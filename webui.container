@@ -6,8 +6,10 @@ Wants=network-online.target
 [Container]
 Image=docker.io/nginx:alpine
 ContainerName=openttd-webui
+Network=openttd.network
 PublishPort=8088:80
 Volume=%h/source/dedicatedservers/openttd/webui:/usr/share/nginx/html:ro
+Volume=%h/source/dedicatedservers/openttd/webui/nginx.conf:/etc/nginx/conf.d/default.conf:ro
 
 [Service]
 Restart=on-failure

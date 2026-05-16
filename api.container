@@ -1,0 +1,19 @@
+[Unit]
+Description=OpenTTD Config Editor API
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image=localhost/openttd-api:latest
+ContainerName=api
+Network=openttd.network
+Volume=%h/source/dedicatedservers/openttd/data:/data
+GIDMap=+g1000:@1000:1
+Environment=DATA_DIR=/data/.config/openttd
+
+[Service]
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target
