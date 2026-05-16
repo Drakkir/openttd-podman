@@ -1,3 +1,6 @@
+# systemd quadlet unit. Alternative deployment: compose.yaml.
+# Don't run both — same container names.
+
 [Unit]
 Description=OpenTTD Config Editor API
 After=network-online.target

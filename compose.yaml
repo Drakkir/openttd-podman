@@ -1,3 +1,9 @@
+# podman-compose deployment.
+# Alternative: systemd quadlet units (openttd.container, webui.container,
+# api.container, openttd.network). Don't run both — same names and ports.
+# Keep this file in sync with the .container/.network files when changing
+# images, ports, or volumes.
+
 services:
   openttd:
     build: .
