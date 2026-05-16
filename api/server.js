@@ -92,9 +92,29 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, JSON.stringify({ ok: true }), 'application/json');
     }
     if (req.url === '/api/fresh-start' && req.method === 'POST') {
+      const adminPw = readAdminPassword();
+      if (!adminPw) {
+        return send(res, 500, JSON.stringify({
+          ok: false,
+          error: 'admin_password not set in secrets.cfg',
+        }), 'application/json');
+      }
       const sentinel = path.join(DATA_ROOT, '.no-resume');
       await fs.promises.writeFile(sentinel, 'set ' + new Date().toISOString() + '\n');
-      console.log(`[${new Date().toISOString()}] sentinel created: ${sentinel}`);
+      console.log(`[${new Date().toISOString()}] sentinel created, sending quit`);
+      try {
+        await rconQuit({
+          host: OPENTTD_HOST,
+          port: OPENTTD_ADMIN_PORT,
+          password: adminPw,
+        });
+      } catch (err) {
+        return send(res, 502, JSON.stringify({
+          ok: false,
+          error: 'sentinel set but could not reach admin port: ' + err.message,
+          hint: 'check allow_insecure_admin_login = true in openttd.cfg; sentinel will still apply on next manual restart',
+        }), 'application/json');
+      }
       return send(res, 200, JSON.stringify({ ok: true, sentinel }), 'application/json');
     }
     const m = req.url.match(/^\/api\/cfg\/(openttd|private|secrets)$/);
