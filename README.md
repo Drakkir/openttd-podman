@@ -17,6 +17,19 @@ Self-hosted OpenTTD dedicated server in podman, plus a schema-driven web config 
   - Drag-and-drop uploads (multiple files at once)
   - Wiki links per setting where applicable
 
+## Choose your deployment
+
+Two equivalent ways to run the same three containers. **Pick one — don't run both**, they share container names and ports.
+
+| | `podman-compose` | systemd quadlet |
+|---|---|---|
+| Lifecycle | `podman-compose up/down` | `systemctl --user start/stop ...` |
+| Logs | `podman-compose logs -f` | `journalctl --user -u openttd -f` |
+| Auto-start at login | No | Yes if you symlink the units (current files omit it) |
+| Portability | Works with `docker-compose` too | podman-only |
+
+If you don't have a strong preference: compose is simpler to get going. Quadlet integrates nicer with systemd if you already manage other user services that way.
+
 ## Quick start (compose)
 
 ```sh
@@ -61,13 +74,17 @@ Stop with `podman-compose down`, view logs with `podman-compose logs -f openttd`
 ## Quick start (quadlet, systemd-user)
 
 ```sh
-ln -s "$PWD/openttd.container" ~/.config/containers/systemd/
-ln -s "$PWD/webui.container"   ~/.config/containers/systemd/
+./build.sh                                                # builds both images
+ln -s "$PWD/openttd.container" "$PWD/webui.container" \
+      "$PWD/api.container" "$PWD/openttd.network" \
+      ~/.config/containers/systemd/
 systemctl --user daemon-reload
-systemctl --user start openttd webui
+systemctl --user start openttd api webui
 ```
 
-`./build.sh` builds the OpenTTD image before first start.
+(If you also want auto-start at user login: add an `[Install]\nWantedBy=default.target` section and run `loginctl enable-linger $USER` plus `systemctl --user enable openttd api webui`.)
+
+The post-start configuration flow (open webui → edit → "Spara till server" → restart) is identical to the compose path; just substitute `systemctl --user restart openttd` for `podman restart openttd`.
 
 ## Data
 

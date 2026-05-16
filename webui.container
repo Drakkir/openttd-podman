@@ -1,3 +1,6 @@
+# systemd quadlet unit. Alternative deployment: compose.yaml.
+# Don't run both — same container names and host ports.
+
 [Unit]
 Description=OpenTTD Config Editor (nginx)
 After=network-online.target
