@@ -99,9 +99,20 @@ const server = http.createServer(async (req, res) => {
           error: 'admin_password not set in secrets.cfg',
         }), 'application/json');
       }
+      // Stage cfg if provided (so the user's pending edits win after restart).
+      const body = await readBody(req);
+      if (body) {
+        const parsed = JSON.parse(body);
+        for (const target of ['openttd', 'private', 'secrets']) {
+          if (typeof parsed[target] !== 'string') continue;
+          const staged = path.join(DATA_DIR, target + '.cfg.staged');
+          await fs.promises.writeFile(staged + '.tmp', parsed[target], 'utf-8');
+          await fs.promises.rename(staged + '.tmp', staged);
+        }
+      }
       const sentinel = path.join(DATA_ROOT, '.no-resume');
       await fs.promises.writeFile(sentinel, 'set ' + new Date().toISOString() + '\n');
-      console.log(`[${new Date().toISOString()}] sentinel created, sending quit`);
+      console.log(`[${new Date().toISOString()}] sentinel + staged cfg ready, sending quit`);
       try {
         await rconQuit({
           host: OPENTTD_HOST,

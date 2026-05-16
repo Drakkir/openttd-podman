@@ -1003,8 +1003,20 @@ async function applyAndRestart() {
 async function freshStart() {
   if (!confirm(T('fresh_start_confirm'))) return;
   try {
-    const r = await fetch('/api/fresh-start', { method: 'POST' });
-    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const body = {
+      openttd: serializeCfg('openttd'),
+      private: serializeCfg('private'),
+      secrets: serializeCfg('secrets'),
+    };
+    const r = await fetch('/api/fresh-start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) {
+      const data = await r.json().catch(() => ({}));
+      throw new Error(data.error || ('HTTP ' + r.status));
+    }
     flash(T('fresh_start_done'));
   } catch (e) {
     flash(T('save_failed') + e.message);
