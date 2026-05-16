@@ -1008,7 +1008,7 @@ function init() {
     $('#settings').textContent = 'schema.js saknas — kör build-schema.py först.';
     return;
   }
-  state.currentGroup = 'Server';
+  state.currentGroup = 'server';
   $('#lang').value = state.lang;
   $('#lang').addEventListener('change', e => {
     state.lang = e.target.value;
