@@ -1,0 +1,21 @@
+services:
+  openttd:
+    build: .
+    image: localhost/openttd-server:latest
+    container_name: openttd
+    restart: unless-stopped
+    ports:
+      - "3979:3979/tcp"
+      - "3979:3979/udp"
+    volumes:
+      - ./data:/data
+    userns_mode: keep-id
+
+  webui:
+    image: docker.io/nginx:alpine
+    container_name: openttd-webui
+    restart: unless-stopped
+    ports:
+      - "8088:80"
+    volumes:
+      - ./webui:/usr/share/nginx/html:ro

@@ -1,0 +1,11 @@
+# Server-runtime state — användarens egna saves, openttd.cfg, lösenord
+data/
+
+# Lokala overrides
+*.local
+
+# OS / editor cruft
+.DS_Store
+*.swp
+.vscode/
+.idea/

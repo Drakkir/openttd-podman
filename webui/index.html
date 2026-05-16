@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenTTD Config Editor</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="drop-overlay">
+  <div class="drop-card">Släpp .cfg-filer för att ladda in</div>
+</div>
+<header>
+  <h1>OpenTTD Config Editor</h1>
+  <div class="actions">
+    <select id="lang" class="btn" title="Språk">
+      <option value="sv">Svenska</option>
+      <option value="en">English</option>
+    </select>
+    <a class="btn" href="https://wiki.openttd.org/en/Archive/Manual/Settings/Openttd.cfg" target="_blank" rel="noopener">OpenTTD-wikin ↗</a>
+    <label class="btn">
+      <input type="file" id="upload" accept=".cfg" multiple hidden>
+      Ladda upp .cfg-filer
+    </label>
+    <button id="dl-openttd" class="btn primary">openttd.cfg</button>
+    <button id="dl-private" class="btn">private.cfg</button>
+    <button id="dl-secrets" class="btn">secrets.cfg</button>
+  </div>
+</header>
+<div class="layout">
+  <aside id="nav"></aside>
+  <main>
+    <div class="toolbar">
+      <input id="search" type="search" placeholder="Sök inställning…">
+      <label class="filter">
+        <input type="checkbox" id="show-advanced">
+        Visa avancerade + expert
+      </label>
+    </div>
+    <div id="settings"></div>
+  </main>
+</div>
+<p id="status">Laddar schema…</p>
+<script src="schema.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

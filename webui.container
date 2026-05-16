@@ -1,0 +1,17 @@
+[Unit]
+Description=OpenTTD Config Editor (nginx)
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image=docker.io/nginx:alpine
+ContainerName=openttd-webui
+PublishPort=8088:80
+Volume=%h/source/dedicatedservers/openttd/webui:/usr/share/nginx/html:ro
+
+[Service]
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target
