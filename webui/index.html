@@ -22,7 +22,11 @@
       <input type="file" id="upload" accept=".cfg" multiple hidden>
       Ladda upp .cfg-filer
     </label>
-    <button id="dl-openttd" class="btn primary">openttd.cfg</button>
+    <span id="api-status" class="api-status" title="Server-anslutning">●</span>
+    <button id="server-load" class="btn" disabled>Hämta från server</button>
+    <button id="server-save" class="btn primary" disabled>Spara till server</button>
+    <span class="btn-sep">|</span>
+    <button id="dl-openttd" class="btn">openttd.cfg</button>
     <button id="dl-private" class="btn">private.cfg</button>
     <button id="dl-secrets" class="btn">secrets.cfg</button>
   </div>

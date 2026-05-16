@@ -646,6 +646,58 @@ function serializeCfg(targetFile) {
   return lines.join('\n');
 }
 
+// ===== Server API (level A: read/write cfg files via backend) =====
+async function pingApi() {
+  const ind = $('#api-status');
+  try {
+    const r = await fetch('/api/health', { cache: 'no-store' });
+    if (!r.ok) throw new Error('not ok');
+    ind.classList.add('online');
+    ind.title = 'Ansluten till server';
+    $('#server-load').disabled = false;
+    $('#server-save').disabled = false;
+  } catch {
+    ind.classList.remove('online');
+    ind.title = 'Server-API ej tillgängligt';
+    $('#server-load').disabled = true;
+    $('#server-save').disabled = true;
+  }
+}
+
+async function loadFromServer() {
+  try {
+    const targets = ['openttd', 'private', 'secrets'];
+    const texts = await Promise.all(targets.map(t =>
+      fetch('/api/cfg/' + t).then(r => r.ok ? r.text() : '')));
+    const merged = {};
+    for (const text of texts) {
+      const secs = parseIni(text);
+      for (const [sec, entries] of Object.entries(secs)) {
+        merged[sec] = (merged[sec] || []).concat(entries);
+      }
+    }
+    applyParsedIni(merged);
+    flash('Laddat från servern');
+  } catch (e) {
+    flash('Kunde inte ladda: ' + e.message);
+  }
+}
+
+async function saveToServer() {
+  try {
+    const targets = ['openttd', 'private', 'secrets'];
+    await Promise.all(targets.map(t =>
+      fetch('/api/cfg/' + t, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'text/plain' },
+        body: serializeCfg(t),
+      }).then(r => { if (!r.ok) throw new Error(t + ': ' + r.status); })));
+    flash('Sparat. Starta om servern för att aktivera ändringar.');
+  } catch (e) {
+    flash('Sparning misslyckades: ' + e.message);
+  }
+}
+
 function downloadCfg(targetFile) {
   const blob = new Blob([serializeCfg(targetFile)], { type: 'text/plain' });
   const url = URL.createObjectURL(blob);
@@ -688,6 +740,9 @@ function init() {
   $('#dl-openttd').addEventListener('click', () => downloadCfg('openttd'));
   $('#dl-private').addEventListener('click', () => downloadCfg('private'));
   $('#dl-secrets').addEventListener('click', () => downloadCfg('secrets'));
+  $('#server-load').addEventListener('click', loadFromServer);
+  $('#server-save').addEventListener('click', saveToServer);
+  pingApi();
 
   // Drag-and-drop anywhere on the page.
   const overlay = $('#drop-overlay');

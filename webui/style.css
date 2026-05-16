@@ -23,7 +23,15 @@ header h1 {
   font-weight: 600;
 }
 
-.actions { display: flex; gap: 8px; }
+.actions { display: flex; gap: 8px; align-items: center; }
+.btn-sep { color: #d6d3d1; margin: 0 4px; }
+.api-status {
+  font-size: 14px;
+  color: #cbd5e1;
+  cursor: help;
+  user-select: none;
+}
+.api-status.online { color: #16a34a; }
 .btn {
   display: inline-block;
   padding: 6px 12px;
