@@ -27,10 +27,6 @@
     <button id="server-save" class="btn" data-i18n="save_to_server" disabled>Save to server</button>
     <button id="apply-restart" class="btn primary" data-i18n="apply_restart" disabled>Save + restart server</button>
     <button id="fresh-start" class="btn danger" data-i18n="fresh_start" disabled>Start fresh game</button>
-    <span class="btn-sep">|</span>
-    <button id="dl-openttd" class="btn">openttd.cfg</button>
-    <button id="dl-private" class="btn">private.cfg</button>
-    <button id="dl-secrets" class="btn">secrets.cfg</button>
   </div>
 </header>
 <div class="layout">
@@ -46,6 +42,15 @@
     <div id="settings"></div>
   </main>
 </div>
+<footer id="offline-tools">
+  <div class="ft-label" data-i18n="offline_tools">Offline tools</div>
+  <span class="ft-hint" data-i18n="offline_tools_hint">Download cfg files for manual edit / backup. The live "Save + restart" above is the preferred flow.</span>
+  <span class="ft-buttons">
+    <button id="dl-openttd" class="btn">openttd.cfg</button>
+    <button id="dl-private" class="btn">private.cfg</button>
+    <button id="dl-secrets" class="btn">secrets.cfg</button>
+  </span>
+</footer>
 <p id="status">Laddar schema…</p>
 <script src="schema.js"></script>
 <script src="app.js"></script>

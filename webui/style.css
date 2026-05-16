@@ -271,6 +271,35 @@ main { padding: 18px 24px; max-width: 900px; }
   color: #a8a29e;
 }
 
+#offline-tools {
+  background: #fafaf9;
+  border-top: 1px solid #e7e5e4;
+  padding: 12px 24px;
+  margin-top: 24px;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+  font-size: 13px;
+}
+#offline-tools .ft-label {
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-size: 11px;
+  color: #78716c;
+}
+#offline-tools .ft-hint {
+  color: #78716c;
+  flex: 1;
+  min-width: 200px;
+}
+#offline-tools .ft-buttons {
+  display: flex;
+  gap: 6px;
+}
+#offline-tools .btn { font-size: 12px; padding: 4px 9px; }
+
 #drop-overlay {
   position: fixed;
   inset: 0;
