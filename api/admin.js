@@ -17,7 +17,7 @@ const PKT_SERVER_BANNED = 101;
 const PKT_SERVER_ERROR = 102;
 const PKT_SERVER_PROTOCOL = 103;
 const PKT_SERVER_WELCOME = 104;
-const PKT_SERVER_RCON_END = 123;
+const PKT_SERVER_RCON_END = 125;
 
 function buildPacket(type, ...strings) {
   const parts = [];
@@ -47,18 +47,22 @@ function parseFrames(buffer) {
   return { frames, rest: buffer.slice(off) };
 }
 
-// Send `rcon quit` to make OpenTTD exit. Resolves when the server closes the
-// socket; rejects on error or auth failure.
-function rconQuit({ host, port, password, name = 'webui-api', version = '1' }) {
+// Send a sequence of rcon commands. After auth, all commands are sent
+// back-to-back; OpenTTD processes them in order (save before quit).
+// Resolves when the socket closes (typical after quit) or on timeout
+// if the last command doesn't close the connection.
+function rconCommands({ host, port, password, name = 'webui-api', version = '1' }, commands, opts = {}) {
+  const timeoutMs = opts.timeoutMs ?? 60_000;
+  const expectClose = opts.expectClose !== false;
   return new Promise((resolve, reject) => {
     const sock = net.createConnection({ host, port });
     let buffered = Buffer.alloc(0);
     let authed = false;
-    let quitSent = false;
     let lastError = null;
+    let rconEnds = 0;
 
-    sock.setTimeout(10_000, () => {
-      sock.destroy(new Error('admin handshake timed out'));
+    sock.setTimeout(timeoutMs, () => {
+      sock.destroy(new Error('admin handshake/command timed out after ' + timeoutMs + 'ms'));
     });
 
     sock.on('connect', () => {
@@ -75,8 +79,9 @@ function rconQuit({ host, port, password, name = 'webui-api', version = '1' }) {
           case PKT_SERVER_PROTOCOL:
             if (!authed) {
               authed = true;
-              sock.write(buildPacket(PKT_ADMIN_RCON, 'quit'));
-              quitSent = true;
+              for (const cmd of commands) {
+                sock.write(buildPacket(PKT_ADMIN_RCON, cmd));
+              }
             }
             break;
           case PKT_SERVER_FULL:
@@ -92,7 +97,11 @@ function rconQuit({ host, port, password, name = 'webui-api', version = '1' }) {
             sock.destroy();
             break;
           case PKT_SERVER_RCON_END:
-            // rcon done; quit packet was queued; server will close shortly.
+            rconEnds++;
+            if (!expectClose && rconEnds >= commands.length) {
+              sock.end();
+              resolve();
+            }
             break;
         }
       }
@@ -103,10 +112,17 @@ function rconQuit({ host, port, password, name = 'webui-api', version = '1' }) {
     sock.on('close', () => {
       if (lastError) return reject(lastError);
       if (!authed) return reject(new Error('disconnected before authentication'));
-      if (!quitSent) return reject(new Error('disconnected before quit was sent'));
       resolve();
     });
   });
 }
 
-module.exports = { rconQuit };
+function rconQuit(opts) {
+  return rconCommands(opts, ['quit']);
+}
+
+function rconSaveAndQuit(opts, savename) {
+  return rconCommands(opts, ['save ' + savename, 'quit']);
+}
+
+module.exports = { rconQuit, rconCommands, rconSaveAndQuit };

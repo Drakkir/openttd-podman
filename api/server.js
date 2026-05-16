@@ -4,7 +4,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const { rconQuit } = require('./admin');
+const { rconQuit, rconSaveAndQuit } = require('./admin');
 
 const OPENTTD_HOST = process.env.OPENTTD_HOST || 'openttd';
 const OPENTTD_ADMIN_PORT = parseInt(process.env.OPENTTD_ADMIN_PORT || '3977', 10);
@@ -74,21 +74,24 @@ const server = http.createServer(async (req, res) => {
         await fs.promises.rename(staged + '.tmp', staged);
       }
       try {
-        await rconQuit({
+        // Save game state before quit so the next start has a recent autosave
+        // to resume from. Filename goes under autosave/ so entrypoint picks it
+        // up as the latest .sav.
+        const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+        await rconSaveAndQuit({
           host: OPENTTD_HOST,
           port: OPENTTD_ADMIN_PORT,
           password: adminPw,
-        });
+        }, 'autosave/pre-restart-' + stamp);
       } catch (err) {
-        console.error('rconQuit failed:', err.message);
-        // Clean up staged files so a manual restart doesn't accidentally apply them.
+        console.error('rconSaveAndQuit failed:', err.message);
         return send(res, 502, JSON.stringify({
           ok: false,
           error: 'could not reach openttd admin port: ' + err.message,
-          hint: 'check that allow_insecure_admin_login = true in secrets.cfg',
+          hint: 'check that allow_insecure_admin_login = true in openttd.cfg',
         }), 'application/json');
       }
-      console.log(`[${new Date().toISOString()}] apply-restart: staged cfg, sent quit`);
+      console.log(`[${new Date().toISOString()}] apply-restart: staged cfg, saved game, sent quit`);
       return send(res, 200, JSON.stringify({ ok: true }), 'application/json');
     }
     if (req.url === '/api/fresh-start' && req.method === 'POST') {

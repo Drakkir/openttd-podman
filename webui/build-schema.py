@@ -158,6 +158,12 @@ def main():
 
             block = b['_block']
             entry = {'key': key, 'cat': b.get('cat', 'SC_ADVANCED').replace('SC_', '').lower(), 'file': target_file}
+            # When can this setting be changed? 'newgame' = requires fresh map,
+            # 'live' = applies immediately via rcon setting, 'restart' = cfg-only.
+            if 'NewgameOnly' in flags or 'SceneditOnly' in flags:
+                entry['change'] = 'newgame'
+            else:
+                entry['change'] = 'live'
             if 'GuiZeroIsSpecial' in flags:
                 entry['zero_special'] = True
 
