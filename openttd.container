@@ -9,6 +9,7 @@ Wants=network-online.target
 [Container]
 Image=localhost/openttd-server:latest
 ContainerName=openttd
+Network=openttd.network
 PublishPort=3979:3979/tcp
 PublishPort=3979:3979/udp
 Volume=%h/source/dedicatedservers/openttd/data:/data

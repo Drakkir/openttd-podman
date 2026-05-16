@@ -1,7 +1,7 @@
 FROM docker.io/node:20-alpine
 
 WORKDIR /app
-COPY server.js .
+COPY server.js admin.js ./
 
 USER node
 EXPOSE 3000

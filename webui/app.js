@@ -41,6 +41,10 @@ const I18N = {
     upload_cfg: 'Upload .cfg files',
     load_from_server: 'Load from server',
     save_to_server: 'Save to server',
+    apply_restart: 'Save + restart server',
+    apply_restart_confirm: 'This will stage your changes, tell the server to quit, and let the container auto-restart with your new settings applied. The current game state is preserved via autosave. Proceed?',
+    apply_restart_done: 'Saved and quit signal sent. Server is restarting…',
+    apply_restart_failed: 'Apply failed: ',
     fresh_start: 'Start fresh game',
     fresh_start_confirm: 'On the next server restart, the latest autosave will be skipped and a fresh game will start with the current settings. Old autosaves stay on disk (rotation will eventually overwrite them). Proceed?',
     fresh_start_done: 'Marker set. Restart the server (e.g. `podman restart openttd`) to start fresh.',
@@ -80,6 +84,10 @@ const I18N = {
     upload_cfg: 'Ladda upp .cfg-filer',
     load_from_server: 'Hämta från server',
     save_to_server: 'Spara till server',
+    apply_restart: 'Spara + starta om server',
+    apply_restart_confirm: 'Detta stagear dina ändringar, ber servern avsluta och låter containern auto-starta om med dina nya inställningar. Pågående spel bevaras via autosave. Fortsätta?',
+    apply_restart_done: 'Sparat och quit-signal skickad. Servern startar om…',
+    apply_restart_failed: 'Misslyckades: ',
     fresh_start: 'Starta nytt spel',
     fresh_start_confirm: 'Vid nästa server-omstart hoppas senaste autosave över och ett nytt spel startas med nuvarande inställningar. Gamla autosaves ligger kvar på disk (rotationen skriver så småningom över dem). Fortsätta?',
     fresh_start_done: 'Markör satt. Starta om servern (t.ex. `podman restart openttd`) för att börja om.',
@@ -955,13 +963,36 @@ async function pingApi() {
     ind.title = T('api_online');
     $('#server-load').disabled = false;
     $('#server-save').disabled = false;
+    $('#apply-restart').disabled = false;
     $('#fresh-start').disabled = false;
   } catch {
     ind.classList.remove('online');
     ind.title = T('api_offline');
     $('#server-load').disabled = true;
     $('#server-save').disabled = true;
+    $('#apply-restart').disabled = true;
     $('#fresh-start').disabled = true;
+  }
+}
+
+async function applyAndRestart() {
+  if (!confirm(T('apply_restart_confirm'))) return;
+  try {
+    const body = {
+      openttd: serializeCfg('openttd'),
+      private: serializeCfg('private'),
+      secrets: serializeCfg('secrets'),
+    };
+    const r = await fetch('/api/apply-restart', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
+    flash(T('apply_restart_done'));
+  } catch (e) {
+    flash(T('apply_restart_failed') + e.message);
   }
 }
 
@@ -1055,6 +1086,7 @@ function init() {
   $('#dl-secrets').addEventListener('click', () => downloadCfg('secrets'));
   $('#server-load').addEventListener('click', loadFromServer);
   $('#server-save').addEventListener('click', saveToServer);
+  $('#apply-restart').addEventListener('click', applyAndRestart);
   $('#fresh-start').addEventListener('click', freshStart);
   pingApi();
 
