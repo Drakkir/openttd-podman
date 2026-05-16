@@ -41,6 +41,9 @@ const I18N = {
     upload_cfg: 'Upload .cfg files',
     load_from_server: 'Load from server',
     save_to_server: 'Save to server',
+    fresh_start: 'Start fresh game',
+    fresh_start_confirm: 'On the next server restart, the latest autosave will be skipped and a fresh game will start with the current settings. Old autosaves stay on disk (rotation will eventually overwrite them). Proceed?',
+    fresh_start_done: 'Marker set. Restart the server (e.g. `podman restart openttd`) to start fresh.',
     wiki_link: 'OpenTTD wiki ↗',
     search_placeholder: 'Search settings…',
     show_advanced: 'Show advanced + expert',
@@ -77,6 +80,9 @@ const I18N = {
     upload_cfg: 'Ladda upp .cfg-filer',
     load_from_server: 'Hämta från server',
     save_to_server: 'Spara till server',
+    fresh_start: 'Starta nytt spel',
+    fresh_start_confirm: 'Vid nästa server-omstart hoppas senaste autosave över och ett nytt spel startas med nuvarande inställningar. Gamla autosaves ligger kvar på disk (rotationen skriver så småningom över dem). Fortsätta?',
+    fresh_start_done: 'Markör satt. Starta om servern (t.ex. `podman restart openttd`) för att börja om.',
     wiki_link: 'OpenTTD-wikin ↗',
     search_placeholder: 'Sök inställning…',
     show_advanced: 'Visa avancerade + expert',
@@ -949,11 +955,24 @@ async function pingApi() {
     ind.title = T('api_online');
     $('#server-load').disabled = false;
     $('#server-save').disabled = false;
+    $('#fresh-start').disabled = false;
   } catch {
     ind.classList.remove('online');
     ind.title = T('api_offline');
     $('#server-load').disabled = true;
     $('#server-save').disabled = true;
+    $('#fresh-start').disabled = true;
+  }
+}
+
+async function freshStart() {
+  if (!confirm(T('fresh_start_confirm'))) return;
+  try {
+    const r = await fetch('/api/fresh-start', { method: 'POST' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    flash(T('fresh_start_done'));
+  } catch (e) {
+    flash(T('save_failed') + e.message);
   }
 }
 
@@ -1036,6 +1055,7 @@ function init() {
   $('#dl-secrets').addEventListener('click', () => downloadCfg('secrets'));
   $('#server-load').addEventListener('click', loadFromServer);
   $('#server-save').addEventListener('click', saveToServer);
+  $('#fresh-start').addEventListener('click', freshStart);
   pingApi();
 
   // Drag-and-drop anywhere on the page.

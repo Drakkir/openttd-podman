@@ -6,6 +6,7 @@ const fs = require('fs');
 const path = require('path');
 
 const DATA_DIR = process.env.DATA_DIR || '/data/.config/openttd';
+const DATA_ROOT = process.env.DATA_ROOT || '/data';
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const TARGETS = new Set(['openttd', 'private', 'secrets']);
 
@@ -40,6 +41,12 @@ const server = http.createServer(async (req, res) => {
   try {
     if (req.url === '/api/health') {
       return send(res, 200, JSON.stringify({ ok: true, data_dir: DATA_DIR }), 'application/json');
+    }
+    if (req.url === '/api/fresh-start' && req.method === 'POST') {
+      const sentinel = path.join(DATA_ROOT, '.no-resume');
+      await fs.promises.writeFile(sentinel, 'set ' + new Date().toISOString() + '\n');
+      console.log(`[${new Date().toISOString()}] sentinel created: ${sentinel}`);
+      return send(res, 200, JSON.stringify({ ok: true, sentinel }), 'application/json');
     }
     const m = req.url.match(/^\/api\/cfg\/(openttd|private|secrets)$/);
     if (!m) return send(res, 404, 'not found');
