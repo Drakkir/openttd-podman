@@ -1,102 +1,366 @@
 'use strict';
 
-const GROUPS_ORDER = ['Server', 'Klient', 'Övrigt'];
+// Group IDs (language-neutral). Display labels live in I18N.
+const GROUPS_ORDER = ['server', 'client', 'other'];
 
-// Default group per section. Per-key overrides below take precedence.
 const SECTION_GROUP = {
-  game_creation: 'Server', difficulty: 'Server', economy: 'Server',
-  station: 'Server', vehicle: 'Server', construction: 'Server',
-  order: 'Server', ai: 'Server', script: 'Server',
-  linkgraph: 'Server', pf: 'Server',
-  network: 'Server',
-  gui: 'Klient', news_display: 'Klient', sound: 'Klient', music: 'Klient',
-  misc: 'Övrigt', locale: 'Övrigt',
+  game_creation: 'server', difficulty: 'server', economy: 'server',
+  station: 'server', vehicle: 'server', construction: 'server',
+  order: 'server', ai: 'server', script: 'server',
+  linkgraph: 'server', pf: 'server',
+  network: 'server',
+  gui: 'client', news_display: 'client', sound: 'client', music: 'client',
+  misc: 'other', locale: 'other',
 };
 
-// All network* .ini files write into the [network] cfg section, so per-key overrides
-// here move client-side keys out of Server → Klient.
+// Per-key overrides: move client-side network.* keys out of server group.
 const KEY_OVERRIDES = {
-  'network.client_name': 'Klient',
-  'network.connect_to_ip': 'Klient',
-  'network.last_joined': 'Klient',
-  'network.last_host': 'Klient',
-  'network.last_port': 'Klient',
-  'network.network_id': 'Klient',
-  'network.servers': 'Klient',
-  'network.participate_survey': 'Klient',
-  'network.use_relay_service': 'Klient',
-  'network.client_secret_key': 'Klient',
-  'network.client_public_key': 'Klient',
-  'network.no_http_content_downloads': 'Klient',
+  'network.client_name': 'client',
+  'network.connect_to_ip': 'client',
+  'network.last_joined': 'client',
+  'network.last_host': 'client',
+  'network.last_port': 'client',
+  'network.network_id': 'client',
+  'network.servers': 'client',
+  'network.participate_survey': 'client',
+  'network.use_relay_service': 'client',
+  'network.client_secret_key': 'client',
+  'network.client_public_key': 'client',
+  'network.no_http_content_downloads': 'client',
 };
 
 function groupOf(section, key) {
   return KEY_OVERRIDES[section + '.' + key]
       || SECTION_GROUP[section]
-      || 'Övrigt';
+      || 'other';
 }
 
-// Manual help-text fallbacks for settings that lack strhelp in OpenTTD source.
-const HELP_OVERRIDES = {
-  'difficulty.max_no_competitors': 'Max antal AI-konkurrenter (datorstyrda företag) som kan finnas samtidigt. 0 = inga AI-spelare.',
-  'difficulty.competitors_interval': 'Hur ofta nya AI-konkurrenter dyker upp, mätt i månader mellan spawn-försök.',
-  'difficulty.competitor_start_time': 'Föråldrad: när AI-konkurrenter började dyka upp i gamla sparfiler. Påverkar inte nya spel.',
-  'difficulty.competitor_intelligence': 'Föråldrad: gammal AI-svårighetsnivå. Numera styrs AI:s beteende per AI-skript.',
-  'difficulty.number_towns': 'Tätheten av städer på kartan. Välj "Egna" för att ange exakt antal via custom_town_number.',
-  'difficulty.number_industries': 'Tätheten av industrier på kartan. "Endast finansiering" = inga spontana, måste fonderas av spelare. "Egna" = ange exakt antal via custom_industry_number.',
-  'difficulty.quantity_sea_lakes': 'Mängd hav och sjöar på kartan. "Egna" = ange procent vatten via custom_sea_level.',
-  'difficulty.economy': 'Smart ekonomi: industrier kan stängas/öppnas dynamiskt baserat på efterfrågan.',
-  'difficulty.line_reverse_mode': 'När tåg är tillåtna att vända: vid stationer eller när som helst på spåret.',
-  'difficulty.initial_interest': 'Bank-räntesats för lån (i procent per år, fast under hela spelet). Dubbeltjänst: när economy.inflation är på används samma värde också som ÅRLIG pris-inflation, och betalnings-inflation = detta värde minus 1. Default 2 → 2% pris-inflation, 1% intäkts-inflation. Skillnaden på 1 procentenhet är varför långa spel blir svårare över tid (intäkter halkar efter kostnader). Range 2–4.',
-  'difficulty.max_loan': 'Maxgräns för totalt lån. Värdet är i intern enhet (GBP-bas) — OpenTTD multiplicerar med den valuta spelaren valt för visning. Om economy.inflation är på skalas det effektiva taket upp över tid i takt med inflationen.',
-  'difficulty.construction_cost': 'Skala på konstruktions- och fordonsinköpskostnader. Multiplikatorerna i koden: Låg = 0,75x, Medium = 1,0x, Hög = 1,125x — så skillnaden Låg vs Hög är ca 50% mer. Påverkar: räls, vägar, stationer, signaler, broar, tunnlar, terraforming, fordon. OBS: påverkar inte löpande driftkostnader (det är vehicle_costs).',
-  'difficulty.vehicle_costs': 'Skala på löpande driftkostnader för fordon (bränsle, slitage, lön). Samma multiplikatorer som construction_cost: Låg = 0,75x, Medium = 1,0x, Hög = 1,125x — ca 50% skillnad mellan Låg och Hög. Påverkar speciellt dyra fordon (flyg) och förlust-rutter.',
-  'vehicle.servint_trains': 'Default-värde för hur ofta nya tåg åker till depå för service. Konkret: fordon skickas automatiskt till närmaste depå när intervallet löpt ut, vilket återställer tillförlitlighet och fixar haverier. Värdet anges i dagar (eller % beroende på servint_ispercent). 0 = inget auto-service (fordon åker bara om du sätter en service-order manuellt). Lägre intervall = mer pålitliga fordon men mer "borta från jobbet"-tid. Default brukar vara 150 dagar.',
-  'vehicle.servint_roadveh': 'Default-värde för service-intervall på nya lastbilar/bussar. Se servint_trains för full förklaring. Default brukar vara 150 dagar.',
-  'vehicle.servint_ships': 'Default-värde för service-intervall på nya båtar. Båtar gör typiskt få stop, så ett kort intervall kan tvinga onödiga depå-besök. Default brukar vara 360 dagar.',
-  'vehicle.servint_aircraft': 'Default-värde för service-intervall på nya flygplan. Flyg har naturlig service på flygplatser, så detta påverkar bara den extra schemalagda servicen. Default brukar vara 150 dagar.',
-  'vehicle.servint_ispercent': 'Av: intervall mäts i dagar (t.ex. 150 = var 150:e dag). På: intervall mäts som procent av fordonets max-pålitlighet (t.ex. 50 = service när tillförlitligheten sjunkit till 50% av max). Procentläge är ofta smartare — gamla fordon servas oftare, nya sällan.',
-  'economy.infinite_money': 'Företag kan spendera fritt utan kontogräns och kan inte gå i konkurs. Tar bort hela ekonomi-utmaningen.',
-  'economy.infrastructure_maintenance': 'Underhållskostnader för all infrastruktur (räls, vägar, signaler, stationer, flygplatser, kanaler). Skalas super-linjärt med nätverkets storlek — stora företag straffas hårdare. Balanserar långsiktig snöbollning. Obs: straffet träffar tåg-imperier mycket hårdare än flyg eftersom flygplatser har få tiles men hög intäkt — håll vehicle.plane_speed på default (4 = 1/4 hastighet) så flyget förblir balanserat. Sätt den INTE lägre på multiplayerservrar.',
-  'vehicle.plane_speed': 'Hastighetsdelare för flyg — värdet är delaren. 1 = full hastighet (OP, mycket lönsamt), 2 = halv, 3 = en tredjedel, 4 = en fjärdedel (default — OpenTTD slår redan ner flyget för att balansera mot tåg/lastbilar). Sänk bara om du vill ha snabbare/lönsammare flyg, höj inte (max är 4).',
-  'economy.town_cargo_scale': 'Procentmultiplikator för hur mycket gods (passagerare, post) städer producerar. Range 15–300%, default 100%. Höj för mer trafik, sänk för lugnare tempo.',
-  'economy.industry_cargo_scale': 'Procentmultiplikator för hur mycket råvaror/produkter industrier producerar. Range 15–300%, default 100%. Påverkar bara produktion — inte vad industrier accepterar.',
-  'economy.timekeeping_units': 'Två klockor körs parallellt i spelet: en ekonomi-klocka (styr produktion/finanser) och en kalender-klocka (styr när fordon introduceras). Kalender = klassisk OpenTTD, båda går i takt: 1 år = 12 månader. Väggklocka = ekonomin tickar per realtidsminut, 12 minuter = 1 ekonomi-period. Kalendern är då frikopplad och styrs separat av minutes_per_calendar_year. Fordon kommer i sin kalendermåltid oavsett spelläge.',
-  'economy.minutes_per_calendar_year': 'I Väggklocksläge: hur många realtidsminuter ett kalenderår tar. Default 12 min/år (samma takt som ekonomin). Lägre = kalendern går snabbare (fordon kommer fortare, men ekonomin hinner med fler perioder per kalenderår). Högre = kalendern släpar. 0 = kalendern fryses helt (samma fordon hela spelet). Påverkar inget i Kalenderläge.',
-  'economy.dist_local_authority': 'Maxavstånd (i tiles) inom vilket en stads myndighet anser att din verksamhet räknas som "lokal".',
-  'economy.mod_road_rebuild': 'Hur ofta städer river och bygger om sina vägar. Lägre värde = oftare rivningar.',
-  'economy.station_noise_level': 'Om flygplatser genererar buller som påverkar stadens tillstånd. Av = obegränsat byggande.',
-  'economy.town_noise_population[0]': 'Bullertolerans per småstad (befolkning under första tröskeln). 1 enhet per litet flygfält.',
-  'economy.town_noise_population[1]': 'Bullertolerans per medelstor stad. Höj för fler flygplatser i mindre städer.',
-  'economy.town_noise_population[2]': 'Bullertolerans per storstad.',
-  'economy.town_noise_population[3]': 'Bullertolerans per metropol.',
-  'game_creation.map_x': 'Kartans bredd som logaritm-2. Värde 8 = 256 tiles, 11 = 2048 tiles, 12 = 4096 tiles.',
-  'game_creation.map_y': 'Kartans höjd som logaritm-2. Värde 8 = 256 tiles, 11 = 2048 tiles, 12 = 4096 tiles.',
-  'game_creation.heightmap_height': 'Max höjdnivå vid import av PNG/BMP-heightmap. Gråvärden skalas upp till denna höjd.',
-  'game_creation.water_borders': 'Bitfält: vilka kartkanter som ska vara vatten (1=NV, 2=NO, 4=SO, 8=SV). 15 = alla.',
-  'game_creation.water_border_presets': 'Förinställda kombinationer av vattenkanter — påverkar bara UI:t i kart-genereringsdialogen.',
-  'game_creation.custom_town_number': 'Exakt antal städer på kartan (om man valt "anpassat" antal).',
-  'game_creation.custom_industry_number': 'Exakt antal industrier på kartan (om man valt "anpassat" antal).',
-  'game_creation.custom_terrain_type': 'Exakt högsta terränghöjd (om man valt "anpassad höjd" som terrängtyp).',
-  'game_creation.custom_sea_level': 'Andel vatten i procent (om man valt "anpassad" havsnivå).',
-  'game_creation.min_river_length': 'Minsta längd för en flod (i tiles) för att den ska genereras.',
-  'game_creation.river_route_random': 'Hur slumpmässigt floder slingrar sig. 0 = rakt mot havet, högre = mer kurvor.',
-  'game_creation.se_flat_world_height': 'Starthöjd för en helt platt karta i Scenario Editor (när man väljer "Flat" istället för slumpgenererad terräng). 0 = på havsnivå (allt vatten/strand), 1 = lägsta torra nivå (default), upp till 15. Påverkar inte vanliga genererade kartor — bara när man skapar scenarier manuellt.',
-  'vehicle.dynamic_engines': 'Tillåt varje NewGRF att ha egna fordon. Måste ändras innan ny karta skapas.',
-  'vehicle.extend_vehicle_life': 'Antal år som fordon förblir köpbara efter att de officiellt pensionerats.',
-  'construction.build_on_slopes': 'Tillåt byggande på sluttande mark (annars måste man planera först).',
-  'construction.terraform_per_64k_frames': 'Hastighetsgräns för terraforming (modifiering av mark) — antal tiles per 64k frames.',
-  'construction.terraform_frame_burst': 'Hur mycket terraforming som kan ackumuleras till en kortare burst.',
-  'station.never_expire_airports': 'Flygplatstyper försvinner aldrig från köpmenyn — annars fasas äldre typer ut.',
-  'station.modified_catchment': 'Stationer har realistiska upptagningsområden istället för fasta kvadrater.',
-  'pf.forbid_90_deg': 'Förbjud 90-graderssvängar (skarpa U-svängar) för tåg och båtar.',
-  'pf.path_backoff_interval': 'Hur ofta pathfindern backar och försöker hitta ny väg när den fastnat (i ticks).',
-  'order.improved_load': 'Förbättrad lastningslogik: fordon delar last jämnt vid samma station istället för "först till kvarn".',
-  'order.gradual_loading': 'Last/lossning sker gradvis under tid istället för momentant.',
-  'order.serviceathelipad': 'Helikoptrar servas automatiskt på helipads även utan service-order.',
-  'misc.engine_renew_months': 'Hur många månader innan ett fordons pensionsdatum det ska bytas automatiskt. Negativt = efter pensionsdatum.',
-  'misc.engine_renew_money': 'Lägsta belopp i kassan för att autoersättning ska genomföras. Värdet är i intern enhet (GBP-bas), multipliceras med spelarens valuta vid visning.',
+const I18N = {
+  en: {
+    group_server: 'Server', group_client: 'Client', group_other: 'Other',
+    upload_cfg: 'Upload .cfg files',
+    load_from_server: 'Load from server',
+    save_to_server: 'Save to server',
+    wiki_link: 'OpenTTD wiki ↗',
+    search_placeholder: 'Search settings…',
+    show_advanced: 'Show advanced + expert',
+    select_group: 'Pick a group on the left.',
+    no_matches: 'No matches.',
+    drop_files: 'Drop .cfg files to load',
+    reset_default: 'Reset to default',
+    api_online: 'Connected to server',
+    api_offline: 'Server API unreachable',
+    loaded_from_server: 'Loaded from server',
+    saved_restart: 'Saved. Restart the server to apply.',
+    load_failed: 'Load failed: ',
+    save_failed: 'Save failed: ',
+    config_loaded: 'Configuration loaded',
+    no_cfg_dropped: 'No .cfg files found',
+    loaded_n_files: n => `Loaded ${n} file(s)`,
+    settings_summary: (total, sections) => `${total} settings in ${sections} sections.`,
+  },
+  sv: {
+    group_server: 'Server', group_client: 'Klient', group_other: 'Övrigt',
+    upload_cfg: 'Ladda upp .cfg-filer',
+    load_from_server: 'Hämta från server',
+    save_to_server: 'Spara till server',
+    wiki_link: 'OpenTTD-wikin ↗',
+    search_placeholder: 'Sök inställning…',
+    show_advanced: 'Visa avancerade + expert',
+    select_group: 'Välj en grupp till vänster.',
+    no_matches: 'Inga träffar.',
+    drop_files: 'Släpp .cfg-filer för att ladda in',
+    reset_default: 'Återställ till default',
+    api_online: 'Ansluten till server',
+    api_offline: 'Server-API ej tillgängligt',
+    loaded_from_server: 'Laddat från servern',
+    saved_restart: 'Sparat. Starta om servern för att aktivera ändringar.',
+    load_failed: 'Kunde inte ladda: ',
+    save_failed: 'Sparning misslyckades: ',
+    config_loaded: 'Konfiguration laddad',
+    no_cfg_dropped: 'Inga .cfg-filer hittades',
+    loaded_n_files: n => `Laddade ${n} fil(er)`,
+    settings_summary: (total, sections) => `${total} inställningar i ${sections} sektioner.`,
+  },
 };
+function T(key, ...args) {
+  const v = (I18N[state?.lang] || I18N.en)[key] ?? I18N.en[key] ?? key;
+  return typeof v === 'function' ? v(...args) : v;
+}
+
+function applyI18N() {
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    el.textContent = T(el.dataset.i18n);
+  });
+  const search = document.getElementById('search');
+  if (search) search.placeholder = T('search_placeholder');
+  const drop = document.querySelector('.drop-card');
+  if (drop) drop.textContent = T('drop_files');
+  const apiStatus = document.getElementById('api-status');
+  if (apiStatus) {
+    apiStatus.title = apiStatus.classList.contains('online') ? T('api_online') : T('api_offline');
+  }
+}
+
+// Manual help-text fallbacks for settings whose source strhelp is missing or unclear.
+// Each entry has {en, sv}; getHelp() picks based on state.lang.
+const HELP_OVERRIDES = {
+  'difficulty.max_no_competitors': {
+    en: 'Max number of AI competitors (computer-controlled companies) that can exist simultaneously. 0 = no AI players.',
+    sv: 'Max antal AI-konkurrenter (datorstyrda företag) som kan finnas samtidigt. 0 = inga AI-spelare.',
+  },
+  'difficulty.competitors_interval': {
+    en: 'How often new AI competitors appear, measured in months between spawn attempts.',
+    sv: 'Hur ofta nya AI-konkurrenter dyker upp, mätt i månader mellan spawn-försök.',
+  },
+  'difficulty.competitor_start_time': {
+    en: 'Legacy: when AI competitors started appearing in old savegames. Has no effect on new games.',
+    sv: 'Föråldrad: när AI-konkurrenter började dyka upp i gamla sparfiler. Påverkar inte nya spel.',
+  },
+  'difficulty.competitor_intelligence': {
+    en: 'Legacy: old AI difficulty level. Modern AIs control their behaviour via AI scripts instead.',
+    sv: 'Föråldrad: gammal AI-svårighetsnivå. Numera styrs AI:s beteende per AI-skript.',
+  },
+  'difficulty.number_towns': {
+    en: 'Density of towns on the map. Pick "Custom" to set an exact count via custom_town_number.',
+    sv: 'Tätheten av städer på kartan. Välj "Egna" för att ange exakt antal via custom_town_number.',
+  },
+  'difficulty.number_industries': {
+    en: 'Density of industries. "Funding only" = no spontaneous spawns, players must fund them. "Custom" = exact count via custom_industry_number.',
+    sv: 'Tätheten av industrier på kartan. "Endast finansiering" = inga spontana, måste fonderas av spelare. "Egna" = ange exakt antal via custom_industry_number.',
+  },
+  'difficulty.quantity_sea_lakes': {
+    en: 'Amount of sea and lakes on the map. "Custom" = set water percentage via custom_sea_level.',
+    sv: 'Mängd hav och sjöar på kartan. "Egna" = ange procent vatten via custom_sea_level.',
+  },
+  'difficulty.economy': {
+    en: 'Smart economy: industries can close or open dynamically based on demand.',
+    sv: 'Smart ekonomi: industrier kan stängas/öppnas dynamiskt baserat på efterfrågan.',
+  },
+  'difficulty.line_reverse_mode': {
+    en: 'When trains are allowed to reverse: only at stations or anywhere on track.',
+    sv: 'När tåg är tillåtna att vända: vid stationer eller när som helst på spåret.',
+  },
+  'difficulty.initial_interest': {
+    en: 'Bank loan interest rate (% per year, fixed for the whole game). Double duty: when economy.inflation is on, the same value is used as ANNUAL price inflation, and payment inflation = this value minus 1. Default 2 → 2% price inflation, 1% income inflation. The 1 pp gap is why long games get harder over time (income falls behind costs). Range 2–4.',
+    sv: 'Bank-räntesats för lån (i procent per år, fast under hela spelet). Dubbeltjänst: när economy.inflation är på används samma värde också som ÅRLIG pris-inflation, och betalnings-inflation = detta värde minus 1. Default 2 → 2% pris-inflation, 1% intäkts-inflation. Skillnaden på 1 procentenhet är varför långa spel blir svårare över tid (intäkter halkar efter kostnader). Range 2–4.',
+  },
+  'difficulty.max_loan': {
+    en: 'Maximum total loan. Stored in internal units (GBP-based) — OpenTTD multiplies by the player\'s chosen currency for display. If economy.inflation is on, the effective ceiling scales up over time at the inflation rate.',
+    sv: 'Maxgräns för totalt lån. Värdet är i intern enhet (GBP-bas) — OpenTTD multiplicerar med den valuta spelaren valt för visning. Om economy.inflation är på skalas det effektiva taket upp över tid i takt med inflationen.',
+  },
+  'difficulty.construction_cost': {
+    en: 'Scaling on construction and vehicle purchase costs. Multipliers from source: Low = 0.75x, Medium = 1.0x, High = 1.125x — so Low vs High differs by ~50%. Affects: rails, roads, stations, signals, bridges, tunnels, terraforming, vehicles. NOTE: does NOT affect running costs (that\'s vehicle_costs).',
+    sv: 'Skala på konstruktions- och fordonsinköpskostnader. Multiplikatorerna i koden: Låg = 0,75x, Medium = 1,0x, Hög = 1,125x — så skillnaden Låg vs Hög är ca 50% mer. Påverkar: räls, vägar, stationer, signaler, broar, tunnlar, terraforming, fordon. OBS: påverkar inte löpande driftkostnader (det är vehicle_costs).',
+  },
+  'difficulty.vehicle_costs': {
+    en: 'Scaling on running costs of vehicles (fuel, wear, wages). Same multipliers as construction_cost: Low = 0.75x, Medium = 1.0x, High = 1.125x — ~50% gap between Low and High. Especially affects expensive vehicles (aircraft) and loss-making routes.',
+    sv: 'Skala på löpande driftkostnader för fordon (bränsle, slitage, lön). Samma multiplikatorer som construction_cost: Låg = 0,75x, Medium = 1,0x, Hög = 1,125x — ca 50% skillnad mellan Låg och Hög. Påverkar speciellt dyra fordon (flyg) och förlust-rutter.',
+  },
+  'vehicle.servint_trains': {
+    en: 'Default service interval for new trains. Vehicles are auto-sent to the nearest depot when the interval elapses, restoring reliability and fixing breakdowns. Unit: days (or % depending on servint_ispercent). 0 = no auto-service (only via explicit service orders). Lower = more reliable but more downtime. Default is typically 150 days.',
+    sv: 'Default-värde för hur ofta nya tåg åker till depå för service. Konkret: fordon skickas automatiskt till närmaste depå när intervallet löpt ut, vilket återställer tillförlitlighet och fixar haverier. Värdet anges i dagar (eller % beroende på servint_ispercent). 0 = inget auto-service (fordon åker bara om du sätter en service-order manuellt). Lägre intervall = mer pålitliga fordon men mer "borta från jobbet"-tid. Default brukar vara 150 dagar.',
+  },
+  'vehicle.servint_roadveh': {
+    en: 'Default service interval for new road vehicles (trucks, buses). See servint_trains for the full explanation. Default is typically 150 days.',
+    sv: 'Default-värde för service-intervall på nya lastbilar/bussar. Se servint_trains för full förklaring. Default brukar vara 150 dagar.',
+  },
+  'vehicle.servint_ships': {
+    en: 'Default service interval for new ships. Ships make few stops, so a short interval can force unnecessary depot visits. Default is typically 360 days.',
+    sv: 'Default-värde för service-intervall på nya båtar. Båtar gör typiskt få stop, så ett kort intervall kan tvinga onödiga depå-besök. Default brukar vara 360 dagar.',
+  },
+  'vehicle.servint_aircraft': {
+    en: 'Default service interval for new aircraft. Planes get natural servicing at airports, so this only affects extra scheduled service. Default is typically 150 days.',
+    sv: 'Default-värde för service-intervall på nya flygplan. Flyg har naturlig service på flygplatser, så detta påverkar bara den extra schemalagda servicen. Default brukar vara 150 dagar.',
+  },
+  'vehicle.servint_ispercent': {
+    en: 'Off: interval is measured in days (e.g. 150 = every 150 days). On: interval is a % of the vehicle\'s max reliability (e.g. 50 = service when reliability drops to 50% of max). Percent mode is often smarter — old vehicles get serviced more often, new ones rarely.',
+    sv: 'Av: intervall mäts i dagar (t.ex. 150 = var 150:e dag). På: intervall mäts som procent av fordonets max-pålitlighet (t.ex. 50 = service när tillförlitligheten sjunkit till 50% av max). Procentläge är ofta smartare — gamla fordon servas oftare, nya sällan.',
+  },
+  'economy.infinite_money': {
+    en: 'Companies can spend freely without a balance limit and cannot go bankrupt. Removes the entire economy challenge.',
+    sv: 'Företag kan spendera fritt utan kontogräns och kan inte gå i konkurs. Tar bort hela ekonomi-utmaningen.',
+  },
+  'economy.infrastructure_maintenance': {
+    en: 'Maintenance cost on all infrastructure (rails, roads, signals, stations, airports, canals). Scales super-linearly with network size — large companies are penalised harder. Balances long-term snowballing. Note: the penalty hits train empires much harder than airlines because airports have few tiles but high revenue — keep vehicle.plane_speed at its default (4 = 1/4 speed) so aircraft stay balanced. Do NOT lower it on multiplayer servers.',
+    sv: 'Underhållskostnader för all infrastruktur (räls, vägar, signaler, stationer, flygplatser, kanaler). Skalas super-linjärt med nätverkets storlek — stora företag straffas hårdare. Balanserar långsiktig snöbollning. Obs: straffet träffar tåg-imperier mycket hårdare än flyg eftersom flygplatser har få tiles men hög intäkt — håll vehicle.plane_speed på default (4 = 1/4 hastighet) så flyget förblir balanserat. Sätt den INTE lägre på multiplayerservrar.',
+  },
+  'vehicle.max_trains': {
+    en: 'Max trains per company. Setting to 0 disables the entire rail system: nobody can buy trains AND rails/train stations disappear from the build menu. Great for "no rail" challenges.',
+    sv: 'Max antal tåg per företag. Sätter du 0 disablas hela tåg-systemet: ingen kan köpa tåg OCH räls/tågstationer försvinner från byggmenyn. Bra för "no rail"-utmaningar.',
+  },
+  'vehicle.max_roadveh': {
+    en: 'Max road vehicles per company. 0 disables both vehicles AND road construction/bus stops. Great for "no road" challenges.',
+    sv: 'Max antal lastbilar/bussar per företag. 0 disablar både fordon OCH vägbygge/hållplatser. Bra för "no road"-utmaningar.',
+  },
+  'vehicle.max_aircraft': {
+    en: 'Max aircraft per company. 0 disables both aircraft AND airport construction — the whole air-infrastructure disappears from the build menu. The classic "no plane" server setting.',
+    sv: 'Max antal flygplan per företag. 0 disablar både flyg OCH flygplatsbygge — hela flyg-infrastrukturen försvinner från byggmenyn. Klassiker för "no plane"-servrar.',
+  },
+  'vehicle.max_ships': {
+    en: 'Max ships per company. 0 disables both vehicles AND harbours/canals. Great for "no ship" challenges.',
+    sv: 'Max antal båtar per företag. 0 disablar både fordon OCH hamnar/kanaler. Bra för "no ship"-utmaningar.',
+  },
+  'vehicle.plane_speed': {
+    en: 'Aircraft speed divisor — the value is the divisor. 1 = full speed (OP, very profitable), 2 = half, 3 = a third, 4 = a quarter (default — OpenTTD already slows aircraft down to balance them against trains/road vehicles). Lower it only if you want faster/more profitable planes; you can\'t go higher (max is 4).',
+    sv: 'Hastighetsdelare för flyg — värdet är delaren. 1 = full hastighet (OP, mycket lönsamt), 2 = halv, 3 = en tredjedel, 4 = en fjärdedel (default — OpenTTD slår redan ner flyget för att balansera mot tåg/lastbilar). Sänk bara om du vill ha snabbare/lönsammare flyg, höj inte (max är 4).',
+  },
+  'economy.town_cargo_scale': {
+    en: 'Percentage multiplier for how much cargo (passengers, mail) towns produce. Range 15–300%, default 100%. Raise for more traffic, lower for a calmer pace.',
+    sv: 'Procentmultiplikator för hur mycket gods (passagerare, post) städer producerar. Range 15–300%, default 100%. Höj för mer trafik, sänk för lugnare tempo.',
+  },
+  'economy.industry_cargo_scale': {
+    en: 'Percentage multiplier for how much raw materials/products industries produce. Range 15–300%, default 100%. Only affects production — not what industries accept.',
+    sv: 'Procentmultiplikator för hur mycket råvaror/produkter industrier producerar. Range 15–300%, default 100%. Påverkar bara produktion — inte vad industrier accepterar.',
+  },
+  'economy.timekeeping_units': {
+    en: 'Two clocks run in parallel: an economy clock (drives production/finances) and a calendar clock (drives vehicle introduction dates). Calendar = classic OpenTTD, both clocks lock-stepped: 1 year = 12 months. Wallclock = the economy ticks per real-time minute, 12 minutes = 1 economy period. The calendar is then decoupled and controlled separately by minutes_per_calendar_year. Vehicles still arrive in their calendar year regardless of mode.',
+    sv: 'Två klockor körs parallellt i spelet: en ekonomi-klocka (styr produktion/finanser) och en kalender-klocka (styr när fordon introduceras). Kalender = klassisk OpenTTD, båda går i takt: 1 år = 12 månader. Väggklocka = ekonomin tickar per realtidsminut, 12 minuter = 1 ekonomi-period. Kalendern är då frikopplad och styrs separat av minutes_per_calendar_year. Fordon kommer i sin kalendermåltid oavsett spelläge.',
+  },
+  'economy.minutes_per_calendar_year': {
+    en: 'In Wallclock mode: how many real-time minutes one calendar year takes. Default 12 min/year (same pace as the economy). Lower = the calendar runs faster (vehicles arrive sooner, but the economy fits more periods per calendar year). Higher = the calendar trails. 0 = the calendar is fully frozen (same vehicles for the whole game). Has no effect in Calendar mode.',
+    sv: 'I Väggklocksläge: hur många realtidsminuter ett kalenderår tar. Default 12 min/år (samma takt som ekonomin). Lägre = kalendern går snabbare (fordon kommer fortare, men ekonomin hinner med fler perioder per kalenderår). Högre = kalendern släpar. 0 = kalendern fryses helt (samma fordon hela spelet). Påverkar inget i Kalenderläge.',
+  },
+  'economy.dist_local_authority': {
+    en: 'Max distance (tiles) within which a town\'s local authority considers your activity "local".',
+    sv: 'Maxavstånd (i tiles) inom vilket en stads myndighet anser att din verksamhet räknas som "lokal".',
+  },
+  'economy.mod_road_rebuild': {
+    en: 'How often towns demolish and rebuild their roads. Lower value = more frequent rebuilding.',
+    sv: 'Hur ofta städer river och bygger om sina vägar. Lägre värde = oftare rivningar.',
+  },
+  'economy.station_noise_level': {
+    en: 'Whether airports generate noise that affects the town\'s permission. Off = unlimited construction.',
+    sv: 'Om flygplatser genererar buller som påverkar stadens tillstånd. Av = obegränsat byggande.',
+  },
+  'economy.town_noise_population[0]': {
+    en: 'Noise tolerance for the smallest towns (population below the first threshold). 1 unit per small airport.',
+    sv: 'Bullertolerans per småstad (befolkning under första tröskeln). 1 enhet per litet flygfält.',
+  },
+  'economy.town_noise_population[1]': {
+    en: 'Noise tolerance for medium-sized towns. Raise to allow more airports in smaller towns.',
+    sv: 'Bullertolerans per medelstor stad. Höj för fler flygplatser i mindre städer.',
+  },
+  'economy.town_noise_population[2]': {
+    en: 'Noise tolerance for large towns.',
+    sv: 'Bullertolerans per storstad.',
+  },
+  'economy.town_noise_population[3]': {
+    en: 'Noise tolerance for metropolises.',
+    sv: 'Bullertolerans per metropol.',
+  },
+  'game_creation.map_x': {
+    en: 'Map width as log2. Value 8 = 256 tiles, 11 = 2048 tiles, 12 = 4096 tiles.',
+    sv: 'Kartans bredd som logaritm-2. Värde 8 = 256 tiles, 11 = 2048 tiles, 12 = 4096 tiles.',
+  },
+  'game_creation.map_y': {
+    en: 'Map height as log2. Value 8 = 256 tiles, 11 = 2048 tiles, 12 = 4096 tiles.',
+    sv: 'Kartans höjd som logaritm-2. Värde 8 = 256 tiles, 11 = 2048 tiles, 12 = 4096 tiles.',
+  },
+  'game_creation.heightmap_height': {
+    en: 'Maximum height level when importing a PNG/BMP heightmap. Grayscale values are scaled up to this height.',
+    sv: 'Max höjdnivå vid import av PNG/BMP-heightmap. Gråvärden skalas upp till denna höjd.',
+  },
+  'game_creation.water_borders': {
+    en: 'Bitfield: which map edges are water (1=NW, 2=NE, 4=SE, 8=SW). 15 = all.',
+    sv: 'Bitfält: vilka kartkanter som ska vara vatten (1=NV, 2=NO, 4=SO, 8=SV). 15 = alla.',
+  },
+  'game_creation.water_border_presets': {
+    en: 'Preset combinations of water borders — only affects the UI in the map-generation dialog.',
+    sv: 'Förinställda kombinationer av vattenkanter — påverkar bara UI:t i kart-genereringsdialogen.',
+  },
+  'game_creation.custom_town_number': {
+    en: 'Exact number of towns on the map (when "custom" count is selected).',
+    sv: 'Exakt antal städer på kartan (om man valt "anpassat" antal).',
+  },
+  'game_creation.custom_industry_number': {
+    en: 'Exact number of industries on the map (when "custom" count is selected).',
+    sv: 'Exakt antal industrier på kartan (om man valt "anpassat" antal).',
+  },
+  'game_creation.custom_terrain_type': {
+    en: 'Exact maximum terrain height (when "custom height" is selected as terrain type).',
+    sv: 'Exakt högsta terränghöjd (om man valt "anpassad höjd" som terrängtyp).',
+  },
+  'game_creation.custom_sea_level': {
+    en: 'Water percentage (when "custom" sea level is selected).',
+    sv: 'Andel vatten i procent (om man valt "anpassad" havsnivå).',
+  },
+  'game_creation.min_river_length': {
+    en: 'Minimum length (tiles) for a river to be generated.',
+    sv: 'Minsta längd för en flod (i tiles) för att den ska genereras.',
+  },
+  'game_creation.river_route_random': {
+    en: 'How randomly rivers wind. 0 = straight to the sea, higher = more curves.',
+    sv: 'Hur slumpmässigt floder slingrar sig. 0 = rakt mot havet, högre = mer kurvor.',
+  },
+  'game_creation.se_flat_world_height': {
+    en: 'Starting height for a completely flat map in the Scenario Editor (when you choose "Flat" instead of randomly generated terrain). 0 = sea level (all water/coast), 1 = lowest dry level (default), up to 15. Does NOT affect normally generated maps — only when creating scenarios manually.',
+    sv: 'Starthöjd för en helt platt karta i Scenario Editor (när man väljer "Flat" istället för slumpgenererad terräng). 0 = på havsnivå (allt vatten/strand), 1 = lägsta torra nivå (default), upp till 15. Påverkar inte vanliga genererade kartor — bara när man skapar scenarier manuellt.',
+  },
+  'vehicle.dynamic_engines': {
+    en: 'Allow each NewGRF to have its own vehicles. Must be changed before a new map is created.',
+    sv: 'Tillåt varje NewGRF att ha egna fordon. Måste ändras innan ny karta skapas.',
+  },
+  'vehicle.extend_vehicle_life': {
+    en: 'Number of years vehicles remain purchasable after their official retirement date.',
+    sv: 'Antal år som fordon förblir köpbara efter att de officiellt pensionerats.',
+  },
+  'construction.build_on_slopes': {
+    en: 'Allow building on sloped terrain (otherwise you must flatten first).',
+    sv: 'Tillåt byggande på sluttande mark (annars måste man planera först).',
+  },
+  'construction.terraform_per_64k_frames': {
+    en: 'Rate limit for terraforming (land modification) — tiles per 64k frames.',
+    sv: 'Hastighetsgräns för terraforming (modifiering av mark) — antal tiles per 64k frames.',
+  },
+  'construction.terraform_frame_burst': {
+    en: 'How much terraforming can be accumulated into a short burst.',
+    sv: 'Hur mycket terraforming som kan ackumuleras till en kortare burst.',
+  },
+  'station.never_expire_airports': {
+    en: 'Airport types never disappear from the buy menu — otherwise older types are phased out.',
+    sv: 'Flygplatstyper försvinner aldrig från köpmenyn — annars fasas äldre typer ut.',
+  },
+  'station.modified_catchment': {
+    en: 'Stations use realistic catchment areas instead of fixed squares.',
+    sv: 'Stationer har realistiska upptagningsområden istället för fasta kvadrater.',
+  },
+  'pf.forbid_90_deg': {
+    en: 'Forbid 90-degree turns (sharp U-turns) for trains and ships.',
+    sv: 'Förbjud 90-graderssvängar (skarpa U-svängar) för tåg och båtar.',
+  },
+  'pf.path_backoff_interval': {
+    en: 'How often the pathfinder backs off and retries when stuck (in ticks).',
+    sv: 'Hur ofta pathfindern backar och försöker hitta ny väg när den fastnat (i ticks).',
+  },
+  'order.improved_load': {
+    en: 'Improved loading logic: vehicles share load evenly at the same station instead of "first come, first served".',
+    sv: 'Förbättrad lastningslogik: fordon delar last jämnt vid samma station istället för "först till kvarn".',
+  },
+  'order.gradual_loading': {
+    en: 'Loading/unloading happens gradually over time instead of instantaneously.',
+    sv: 'Last/lossning sker gradvis under tid istället för momentant.',
+  },
+  'order.serviceathelipad': {
+    en: 'Helicopters are auto-serviced at helipads even without an explicit service order.',
+    sv: 'Helikoptrar servas automatiskt på helipads även utan service-order.',
+  },
+  'misc.engine_renew_months': {
+    en: 'How many months before a vehicle\'s retirement date it should be auto-replaced. Negative = after the retirement date.',
+    sv: 'Hur många månader innan ett fordons pensionsdatum det ska bytas automatiskt. Negativt = efter pensionsdatum.',
+  },
+  'misc.engine_renew_money': {
+    en: 'Minimum cash balance for auto-replacement to fire. Stored in internal units (GBP-based), multiplied by the player\'s currency on display.',
+    sv: 'Lägsta belopp i kassan för att autoersättning ska genomföras. Värdet är i intern enhet (GBP-bas), multipliceras med spelarens valuta vid visning.',
+  },
+};
+
+function lookupHelpOverride(key) {
+  const ov = HELP_OVERRIDES[key];
+  if (!ov) return null;
+  if (typeof ov === 'string') return ov; // legacy plain-string entries
+  return ov[state.lang] || ov.en || ov.sv || null;
+}
 
 // Per-setting hint that explains what the value actually means.
 // Returns a string to append to the help text given a value, or null.
@@ -239,7 +503,7 @@ const state = {
   currentGroup: null,
   currentSection: null, // null = show all sections in currentGroup
   showAdvanced: false,
-  lang: localStorage.getItem('lang') || 'sv',
+  lang: localStorage.getItem('lang') || 'en',
   search: '',
 };
 
@@ -272,10 +536,11 @@ function getLabel(entry) {
   return (state.lang === 'sv' && entry.label_sv) || entry.label || entry.key;
 }
 function getHelp(section, entry) {
+  const ov = lookupHelpOverride(section + '.' + entry.key);
   if (state.lang === 'sv') {
-    return HELP_OVERRIDES[section + '.' + entry.key] || entry.help_sv || entry.help || '';
+    return ov || entry.help_sv || entry.help || '';
   }
-  return entry.help || '';
+  return ov || entry.help || '';
 }
 function getValues(entry) {
   return (state.lang === 'sv' && entry.values_sv) || entry.values || [];
@@ -372,7 +637,7 @@ function renderNav() {
         state.currentGroup = group; state.currentSection = null;
         renderNav(); renderSettings();
       },
-    }, group, el('span', { class: 'count' }, String(total)));
+    }, T('group_' + group), el('span', { class: 'count' }, String(total)));
     nav.appendChild(groupBtn);
 
     if (isCurrentGroup) {
@@ -439,7 +704,7 @@ function renderControl(section, entry) {
   const reset = el('button', {
     class: 'reset-btn',
     type: 'button',
-    title: state.lang === 'sv' ? 'Återställ till default' : 'Reset to default',
+    title: T('reset_default'),
     onclick: () => {
       delete state.values[k];
       if (entry.type === 'bool') inputEl.checked = !!entry.def;
@@ -469,7 +734,7 @@ function renderSettings() {
     for (const [sec, entries] of Object.entries(SCHEMA)) pairs.push([sec, entries]);
   } else if (!state.currentGroup) {
     main.appendChild(el('div', { class: 'empty' },
-      `Välj en grupp till vänster. ${SCHEMA_META.total} inställningar i ${SCHEMA_META.sections} sektioner.`));
+      T('select_group') + ' ' + T('settings_summary', SCHEMA_META.total, SCHEMA_META.sections)));
     return;
   } else {
     const groupIdx = idx[state.currentGroup] || {};
@@ -538,7 +803,7 @@ function renderSettings() {
     }
   }
   if (shown === 0) {
-    main.appendChild(el('div', { class: 'empty' }, 'Inga träffar.'));
+    main.appendChild(el('div', { class: 'empty' }, T('no_matches')));
   }
 }
 
@@ -573,7 +838,7 @@ async function applyFiles(files) {
     }
   }
   applyParsedIni(merged);
-  flash(`Laddade ${files.length} fil(er)`);
+  flash(T('loaded_n_files', files.length));
 }
 
 function applyParsedIni(sections) {
@@ -605,7 +870,7 @@ function applyParsedIni(sections) {
     }
   }
   renderSettings();
-  flash('Konfiguration laddad');
+  flash(T('config_loaded'));
 }
 
 // ===== Download .cfg =====
@@ -653,12 +918,12 @@ async function pingApi() {
     const r = await fetch('/api/health', { cache: 'no-store' });
     if (!r.ok) throw new Error('not ok');
     ind.classList.add('online');
-    ind.title = 'Ansluten till server';
+    ind.title = T('api_online');
     $('#server-load').disabled = false;
     $('#server-save').disabled = false;
   } catch {
     ind.classList.remove('online');
-    ind.title = 'Server-API ej tillgängligt';
+    ind.title = T('api_offline');
     $('#server-load').disabled = true;
     $('#server-save').disabled = true;
   }
@@ -677,9 +942,9 @@ async function loadFromServer() {
       }
     }
     applyParsedIni(merged);
-    flash('Laddat från servern');
+    flash(T('loaded_from_server'));
   } catch (e) {
-    flash('Kunde inte ladda: ' + e.message);
+    flash(T('load_failed') + e.message);
   }
 }
 
@@ -692,9 +957,9 @@ async function saveToServer() {
         headers: { 'Content-Type': 'text/plain' },
         body: serializeCfg(t),
       }).then(r => { if (!r.ok) throw new Error(t + ': ' + r.status); })));
-    flash('Sparat. Starta om servern för att aktivera ändringar.');
+    flash(T('saved_restart'));
   } catch (e) {
-    flash('Sparning misslyckades: ' + e.message);
+    flash(T('save_failed') + e.message);
   }
 }
 
@@ -720,8 +985,9 @@ function init() {
   $('#lang').addEventListener('change', e => {
     state.lang = e.target.value;
     localStorage.setItem('lang', state.lang);
-    renderNav(); renderSettings();
+    applyI18N(); renderNav(); renderSettings();
   });
+  applyI18N();
   renderNav();
   renderSettings();
 
@@ -765,7 +1031,7 @@ function init() {
     overlay.classList.remove('show');
     const files = [...(e.dataTransfer.files || [])].filter(f => f.name.endsWith('.cfg'));
     if (files.length) await applyFiles(files);
-    else flash('Inga .cfg-filer hittades');
+    else flash(T('no_cfg_dropped'));
   });
 }
 

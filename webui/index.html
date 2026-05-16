@@ -8,7 +8,7 @@
 </head>
 <body>
 <div id="drop-overlay">
-  <div class="drop-card">Släpp .cfg-filer för att ladda in</div>
+  <div class="drop-card" data-i18n="drop_files">Drop .cfg files to load</div>
 </div>
 <header>
   <h1>OpenTTD Config Editor</h1>
@@ -17,14 +17,14 @@
       <option value="sv">Svenska</option>
       <option value="en">English</option>
     </select>
-    <a class="btn" href="https://wiki.openttd.org/en/Archive/Manual/Settings/Openttd.cfg" target="_blank" rel="noopener">OpenTTD-wikin ↗</a>
+    <a class="btn" data-i18n="wiki_link" href="https://wiki.openttd.org/en/Archive/Manual/Settings/Openttd.cfg" target="_blank" rel="noopener">OpenTTD wiki ↗</a>
     <label class="btn">
       <input type="file" id="upload" accept=".cfg" multiple hidden>
-      Ladda upp .cfg-filer
+      <span data-i18n="upload_cfg">Upload .cfg files</span>
     </label>
-    <span id="api-status" class="api-status" title="Server-anslutning">●</span>
-    <button id="server-load" class="btn" disabled>Hämta från server</button>
-    <button id="server-save" class="btn primary" disabled>Spara till server</button>
+    <span id="api-status" class="api-status">●</span>
+    <button id="server-load" class="btn" data-i18n="load_from_server" disabled>Load from server</button>
+    <button id="server-save" class="btn primary" data-i18n="save_to_server" disabled>Save to server</button>
     <span class="btn-sep">|</span>
     <button id="dl-openttd" class="btn">openttd.cfg</button>
     <button id="dl-private" class="btn">private.cfg</button>
@@ -35,10 +35,10 @@
   <aside id="nav"></aside>
   <main>
     <div class="toolbar">
-      <input id="search" type="search" placeholder="Sök inställning…">
+      <input id="search" type="search" placeholder="Search settings…">
       <label class="filter">
         <input type="checkbox" id="show-advanced">
-        Visa avancerade + expert
+        <span data-i18n="show_advanced">Show advanced + expert</span>
       </label>
     </div>
     <div id="settings"></div>
