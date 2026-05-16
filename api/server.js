@@ -133,19 +133,26 @@ const server = http.createServer(async (req, res) => {
 
     const target = m[1];
     const file = path.join(DATA_DIR, `${target}.cfg`);
+    const staged = file + '.staged';
 
     if (req.method === 'GET') {
-      const data = await fs.promises.readFile(file, 'utf-8').catch(err => {
-        if (err.code === 'ENOENT') return '';
-        throw err;
-      });
+      // Prefer staged if it exists (last-saved state, not what openttd is using)
+      const data = await fs.promises.readFile(staged, 'utf-8').catch(() =>
+        fs.promises.readFile(file, 'utf-8').catch(err => {
+          if (err.code === 'ENOENT') return '';
+          throw err;
+        })
+      );
       return send(res, 200, data);
     }
     if (req.method === 'PUT') {
       const body = await readBody(req);
-      await atomicWrite(file, body);
-      console.log(`[${new Date().toISOString()}] wrote ${file} (${body.length}B)`);
-      return send(res, 200, JSON.stringify({ ok: true, bytes: body.length }), 'application/json');
+      // Stage instead of clobbering the live .cfg, so OpenTTD's
+      // shutdown-write can't overwrite our edits.
+      await fs.promises.writeFile(staged + '.tmp', body, 'utf-8');
+      await fs.promises.rename(staged + '.tmp', staged);
+      console.log(`[${new Date().toISOString()}] staged ${staged} (${body.length}B)`);
+      return send(res, 200, JSON.stringify({ ok: true, bytes: body.length, staged: true }), 'application/json');
     }
     return send(res, 405, 'method not allowed');
   } catch (err) {
