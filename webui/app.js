@@ -54,6 +54,10 @@ const I18N = {
     change_newgame_long: 'OpenTTD locks this setting after the map is generated. It only takes effect on a fresh game — use "Start fresh game" to apply.',
     change_live: 'live',
     change_live_long: 'Can be applied immediately via the admin port without restarting the server.',
+    apply_live: 'Apply live',
+    apply_live_done: applied => `Applied ${applied} change(s) live. Restart-only changes stayed staged.`,
+    apply_live_failed: 'Live apply failed: ',
+    apply_live_nothing: 'No changes to apply.',
     wiki_link: 'OpenTTD wiki ↗',
     search_placeholder: 'Search settings…',
     show_advanced: 'Show advanced + expert',
@@ -99,6 +103,14 @@ const I18N = {
     fresh_start_done: 'Servern startar om till nytt spel…',
     offline_tools: 'Offline-verktyg',
     offline_tools_hint: 'Ladda ner cfg-filer för manuell editering / backup. "Spara + starta om" ovan är det rekommenderade flödet.',
+    change_newgame: 'kräver nytt spel',
+    change_newgame_long: 'OpenTTD låser denna inställning efter att kartan genererats. Den tar bara effekt vid nytt spel — använd "Starta nytt spel" för att applicera.',
+    change_live: 'live',
+    change_live_long: 'Kan appliceras direkt via admin-porten utan att starta om servern.',
+    apply_live: 'Applicera live',
+    apply_live_done: applied => `Applicerade ${applied} ändring(ar) live. Övriga ändringar är stagade till nästa omstart.`,
+    apply_live_failed: 'Live-applicering misslyckades: ',
+    apply_live_nothing: 'Inga ändringar att applicera.',
     wiki_link: 'OpenTTD-wikin ↗',
     search_placeholder: 'Sök inställning…',
     show_advanced: 'Visa avancerade + expert',
@@ -825,6 +837,12 @@ function renderSettings() {
       if (entry.file && entry.file !== 'openttd') {
         labelChildren.push(el('span', { class: 'badge file' }, '→ ' + entry.file + '.cfg'));
       }
+      if (entry.change === 'newgame') {
+        labelChildren.push(el('span', {
+          class: 'badge newgame',
+          title: T('change_newgame_long'),
+        }, T('change_newgame')));
+      }
       labelChildren.push(el('span', { class: 'key' }, entry.key));
       const wiki = wikiLink(sec, entry.key);
       if (wiki) {
@@ -973,6 +991,7 @@ async function pingApi() {
     $('#server-save').disabled = false;
     $('#apply-restart').disabled = false;
     $('#fresh-start').disabled = false;
+    $('#apply-live').disabled = false;
     if (!initialLoadDone) {
       initialLoadDone = true;
       loadFromServer();
@@ -983,6 +1002,63 @@ async function pingApi() {
     $('#server-save').disabled = true;
     $('#apply-restart').disabled = true;
     $('#fresh-start').disabled = true;
+    $('#apply-live').disabled = true;
+  }
+}
+
+function serializeValueForRcon(entry, v) {
+  // For rcon `setting <name> <value>`, OpenTTD accepts:
+  //   bool → 1 / 0
+  //   enum → integer index
+  //   int → number
+  //   string → bare or quoted; use as-is (without quotes here, OpenTTD strips)
+  if (entry.type === 'bool') return v ? '1' : '0';
+  return String(v ?? '');
+}
+
+function collectModifiedSettings() {
+  // Returns [{section, key, value, entry}, ...] for everything different from default.
+  const out = [];
+  for (const [k, v] of Object.entries(state.values)) {
+    const dot = k.indexOf('.');
+    if (dot < 0) continue;
+    const section = k.slice(0, dot);
+    const key = k.slice(dot + 1);
+    const entry = (SCHEMA[section] || []).find(e => e.key === key);
+    if (!entry) continue;
+    if (v === entry.def) continue;
+    out.push({ section, key, value: v, entry });
+  }
+  return out;
+}
+
+async function applyLive() {
+  const modified = collectModifiedSettings();
+  if (modified.length === 0) {
+    flash(T('apply_live_nothing'));
+    return;
+  }
+  const live = modified.filter(m => m.entry.change === 'live');
+  const settings = live.map(m => ({
+    section: m.section,
+    key: m.key,
+    value: serializeValueForRcon(m.entry, m.value),
+  }));
+  if (settings.length === 0) {
+    flash(T('apply_live_nothing'));
+    return;
+  }
+  try {
+    const r = await fetch('/api/apply-live', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ settings }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
+    flash(T('apply_live_done', data.applied ?? settings.length));
+  } catch (e) {
+    flash(T('apply_live_failed') + e.message);
   }
 }
 
@@ -1108,6 +1184,7 @@ function init() {
   $('#dl-private').addEventListener('click', () => downloadCfg('private'));
   $('#dl-secrets').addEventListener('click', () => downloadCfg('secrets'));
   $('#server-save').addEventListener('click', saveToServer);
+  $('#apply-live').addEventListener('click', applyLive);
   $('#apply-restart').addEventListener('click', applyAndRestart);
   $('#fresh-start').addEventListener('click', freshStart);
   pingApi();

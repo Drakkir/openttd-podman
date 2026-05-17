@@ -156,6 +156,12 @@ main { padding: 18px 24px; max-width: 900px; }
   color: #1e40af;
   border-color: #bfdbfe;
 }
+.setting .badge.newgame {
+  background: #ffedd5;
+  color: #9a3412;
+  border-color: #fed7aa;
+  cursor: help;
+}
 .setting .meta {
   min-width: 0;
 }

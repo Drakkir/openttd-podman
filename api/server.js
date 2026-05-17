@@ -4,7 +4,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const { rconQuit, rconSaveAndQuit } = require('./admin');
+const { rconQuit, rconSaveAndQuit, rconCommands } = require('./admin');
 
 const OPENTTD_HOST = process.env.OPENTTD_HOST || 'openttd';
 const OPENTTD_ADMIN_PORT = parseInt(process.env.OPENTTD_ADMIN_PORT || '3977', 10);
@@ -55,6 +55,44 @@ const server = http.createServer(async (req, res) => {
   try {
     if (req.url === '/api/health') {
       return send(res, 200, JSON.stringify({ ok: true, data_dir: DATA_DIR }), 'application/json');
+    }
+    if (req.url === '/api/apply-live' && req.method === 'POST') {
+      const adminPw = readAdminPassword();
+      if (!adminPw) {
+        return send(res, 500, JSON.stringify({
+          ok: false,
+          error: 'admin_password not set in secrets.cfg',
+        }), 'application/json');
+      }
+      const body = JSON.parse(await readBody(req));
+      const settings = Array.isArray(body.settings) ? body.settings : [];
+      if (settings.length === 0) {
+        return send(res, 200, JSON.stringify({ ok: true, applied: 0 }), 'application/json');
+      }
+      // Build rcon commands. Most settings use `setting <name> <value>`.
+      // A few have dedicated commands (server_name, server_password, rcon_password).
+      const cmds = settings.map(s => {
+        const name = `${s.section}.${s.key}`;
+        const v = String(s.value);
+        if (name === 'network.server_name') return `server_name "${v.replace(/"/g, '\\"')}"`;
+        if (name === 'network.server_password') return `server_password "${v.replace(/"/g, '\\"')}"`;
+        if (name === 'network.rcon_password') return `rcon_password "${v.replace(/"/g, '\\"')}"`;
+        return `setting ${name} ${v}`;
+      });
+      try {
+        await rconCommands({
+          host: OPENTTD_HOST,
+          port: OPENTTD_ADMIN_PORT,
+          password: adminPw,
+        }, cmds, { expectClose: false, timeoutMs: 30_000 });
+      } catch (err) {
+        return send(res, 502, JSON.stringify({
+          ok: false,
+          error: 'admin port error: ' + err.message,
+        }), 'application/json');
+      }
+      console.log(`[${new Date().toISOString()}] apply-live: ${cmds.length} commands`);
+      return send(res, 200, JSON.stringify({ ok: true, applied: cmds.length }), 'application/json');
     }
     if (req.url === '/api/apply-restart' && req.method === 'POST') {
       const body = JSON.parse(await readBody(req));
