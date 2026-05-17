@@ -962,6 +962,7 @@ function serializeCfg(targetFile) {
 }
 
 // ===== Server API (level A: read/write cfg files via backend) =====
+let initialLoadDone = false;
 async function pingApi() {
   const ind = $('#api-status');
   try {
@@ -969,14 +970,16 @@ async function pingApi() {
     if (!r.ok) throw new Error('not ok');
     ind.classList.add('online');
     ind.title = T('api_online');
-    $('#server-load').disabled = false;
     $('#server-save').disabled = false;
     $('#apply-restart').disabled = false;
     $('#fresh-start').disabled = false;
+    if (!initialLoadDone) {
+      initialLoadDone = true;
+      loadFromServer();
+    }
   } catch {
     ind.classList.remove('online');
     ind.title = T('api_offline');
-    $('#server-load').disabled = true;
     $('#server-save').disabled = true;
     $('#apply-restart').disabled = true;
     $('#fresh-start').disabled = true;
@@ -1104,7 +1107,6 @@ function init() {
   $('#dl-openttd').addEventListener('click', () => downloadCfg('openttd'));
   $('#dl-private').addEventListener('click', () => downloadCfg('private'));
   $('#dl-secrets').addEventListener('click', () => downloadCfg('secrets'));
-  $('#server-load').addEventListener('click', loadFromServer);
   $('#server-save').addEventListener('click', saveToServer);
   $('#apply-restart').addEventListener('click', applyAndRestart);
   $('#fresh-start').addEventListener('click', freshStart);
