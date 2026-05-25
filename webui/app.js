@@ -57,9 +57,21 @@ const I18N = {
     change_live: 'live',
     change_live_long: 'Can be applied immediately via the admin port without restarting the server.',
     apply_live: 'Apply live',
-    apply_live_done: applied => `Applied ${applied} change(s) live. Restart-only changes stayed staged.`,
+    apply_live_done: applied => `Applied ${applied} change(s) live.`,
     apply_live_failed: 'Live apply failed: ',
     apply_live_nothing: 'No changes to apply.',
+    apply_live_skipped: (restart, newgame) => {
+      const parts = [];
+      if (restart) parts.push(`${restart} need restart`);
+      if (newgame) parts.push(`${newgame} need new game`);
+      return ' ' + parts.join(', ') + ' — staged.';
+    },
+    apply_live_only_skipped: (restart, newgame) => {
+      const parts = [];
+      if (restart) parts.push(`${restart} require restart`);
+      if (newgame) parts.push(`${newgame} require new game`);
+      return 'Nothing can apply live: ' + parts.join(', ') + '. Changes are staged. Use "Save + restart server" or "Start fresh game" instead.';
+    },
     wiki_link: 'OpenTTD wiki ↗',
     search_placeholder: 'Search settings…',
     show_advanced: 'Show advanced + expert',
@@ -113,9 +125,21 @@ const I18N = {
     change_live: 'live',
     change_live_long: 'Kan appliceras direkt via admin-porten utan att starta om servern.',
     apply_live: 'Applicera live',
-    apply_live_done: applied => `Applicerade ${applied} ändring(ar) live. Övriga ändringar är stagade till nästa omstart.`,
+    apply_live_done: applied => `Applicerade ${applied} ändring(ar) live.`,
     apply_live_failed: 'Live-applicering misslyckades: ',
     apply_live_nothing: 'Inga ändringar att applicera.',
+    apply_live_skipped: (restart, newgame) => {
+      const parts = [];
+      if (restart) parts.push(`${restart} kräver omstart`);
+      if (newgame) parts.push(`${newgame} kräver nytt spel`);
+      return ' ' + parts.join(', ') + ' — stagade.';
+    },
+    apply_live_only_skipped: (restart, newgame) => {
+      const parts = [];
+      if (restart) parts.push(`${restart} kräver omstart`);
+      if (newgame) parts.push(`${newgame} kräver nytt spel`);
+      return 'Inget kan appliceras live: ' + parts.join(', ') + '. Ändringarna är stagade. Använd "Spara + starta om" eller "Starta nytt spel" istället.';
+    },
     wiki_link: 'OpenTTD-wikin ↗',
     search_placeholder: 'Sök inställning…',
     show_advanced: 'Visa avancerade + expert',
@@ -1060,11 +1084,35 @@ async function applyLive() {
     return;
   }
   const live = modified.filter(m => m.entry.change === 'live');
+  const restartCount = modified.filter(m => m.entry.change === 'restart').length;
+  const newgameCount = modified.filter(m => m.entry.change === 'newgame').length;
   const settings = live.map(m => ({
     section: m.section,
     key: m.key,
     value: serializeValueForRcon(m.entry, m.value),
   }));
+  if (settings.length === 0) {
+    // All edits need restart/new game — still stage them via the API.
+    try {
+      await fetch('/api/apply-live', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          openttd: serializeCfg('openttd'),
+          private: serializeCfg('private'),
+          secrets: serializeCfg('secrets'),
+          settings: [],
+        }),
+      });
+      if (!state.loaded) state.loaded = {};
+      for (const m of modified) state.loaded[valKey(m.section, m.key)] = m.value;
+      document.querySelectorAll('.setting.modified').forEach(c => c.classList.remove('modified'));
+      flash(T('apply_live_only_skipped', restartCount, newgameCount));
+    } catch (e) {
+      flash(T('apply_live_failed') + e.message);
+    }
+    return;
+  }
   try {
     const r = await fetch('/api/apply-live', {
       method: 'POST',
@@ -1087,7 +1135,11 @@ async function applyLive() {
       state.loaded[valKey(m.section, m.key)] = m.value;
     }
     document.querySelectorAll('.setting.modified').forEach(c => c.classList.remove('modified'));
-    flash(T('apply_live_done', data.applied ?? settings.length));
+    let msg = T('apply_live_done', data.applied ?? settings.length);
+    if (restartCount || newgameCount) {
+      msg += T('apply_live_skipped', restartCount, newgameCount);
+    }
+    flash(msg);
   } catch (e) {
     flash(T('apply_live_failed') + e.message);
   }
