@@ -159,9 +159,12 @@ def main():
             block = b['_block']
             entry = {'key': key, 'cat': b.get('cat', 'SC_ADVANCED').replace('SC_', '').lower(), 'file': target_file}
             # When can this setting be changed? 'newgame' = requires fresh map,
-            # 'live' = applies immediately via rcon setting, 'restart' = cfg-only.
+            # 'restart' = cfg-only (NoNetwork settings can't be touched at
+            # runtime on a network server), 'live' = applies via rcon setting.
             if 'NewgameOnly' in flags or 'SceneditOnly' in flags:
                 entry['change'] = 'newgame'
+            elif 'NoNetwork' in flags:
+                entry['change'] = 'restart'
             else:
                 entry['change'] = 'live'
             if 'GuiZeroIsSpecial' in flags:

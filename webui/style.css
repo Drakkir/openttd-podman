@@ -162,6 +162,12 @@ main { padding: 18px 24px; max-width: 900px; }
   border-color: #fed7aa;
   cursor: help;
 }
+.setting .badge.restart {
+  background: #fef9c3;
+  color: #854d0e;
+  border-color: #fde68a;
+  cursor: help;
+}
 .setting .meta {
   min-width: 0;
 }

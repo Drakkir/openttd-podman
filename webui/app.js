@@ -52,6 +52,8 @@ const I18N = {
     offline_tools_hint: 'Download cfg files for manual edit / backup. The live "Save + restart" above is the preferred flow.',
     change_newgame: 'needs new game',
     change_newgame_long: 'OpenTTD locks this setting after the map is generated. It only takes effect on a fresh game — use "Start fresh game" to apply.',
+    change_restart: 'needs restart',
+    change_restart_long: 'Flagged NoNetwork in OpenTTD — cannot be modified via rcon on a network server. Edit the cfg and restart the server.',
     change_live: 'live',
     change_live_long: 'Can be applied immediately via the admin port without restarting the server.',
     apply_live: 'Apply live',
@@ -106,6 +108,8 @@ const I18N = {
     offline_tools_hint: 'Ladda ner cfg-filer för manuell editering / backup. "Spara + starta om" ovan är det rekommenderade flödet.',
     change_newgame: 'kräver nytt spel',
     change_newgame_long: 'OpenTTD låser denna inställning efter att kartan genererats. Den tar bara effekt vid nytt spel — använd "Starta nytt spel" för att applicera.',
+    change_restart: 'kräver omstart',
+    change_restart_long: 'Flaggad NoNetwork i OpenTTD — kan inte ändras via rcon på en nätverksserver. Redigera cfg och starta om servern.',
     change_live: 'live',
     change_live_long: 'Kan appliceras direkt via admin-porten utan att starta om servern.',
     apply_live: 'Applicera live',
@@ -847,6 +851,11 @@ function renderSettings() {
           class: 'badge newgame',
           title: T('change_newgame_long'),
         }, T('change_newgame')));
+      } else if (entry.change === 'restart') {
+        labelChildren.push(el('span', {
+          class: 'badge restart',
+          title: T('change_restart_long'),
+        }, T('change_restart')));
       }
       labelChildren.push(el('span', { class: 'key' }, entry.key));
       const wiki = wikiLink(sec, entry.key);
