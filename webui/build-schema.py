@@ -161,7 +161,12 @@ def main():
             # When can this setting be changed? 'newgame' = requires fresh map,
             # 'restart' = cfg-only (NoNetwork settings can't be touched at
             # runtime on a network server), 'live' = applies via rcon setting.
+            # game_creation.* settings all describe map/world generation and
+            # have no practical effect mid-game even when OpenTTD allows the
+            # rcon — bulk-treat them as newgame.
             if 'NewgameOnly' in flags or 'SceneditOnly' in flags:
+                entry['change'] = 'newgame'
+            elif section == 'game_creation' and key != 'ending_year':
                 entry['change'] = 'newgame'
             elif 'NoNetwork' in flags:
                 entry['change'] = 'restart'
