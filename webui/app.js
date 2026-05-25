@@ -61,6 +61,7 @@ const I18N = {
     wiki_link: 'OpenTTD wiki ↗',
     search_placeholder: 'Search settings…',
     show_advanced: 'Show advanced + expert',
+    live_only: 'Only live-changeable',
     select_group: 'Pick a group on the left.',
     no_matches: 'No matches.',
     drop_files: 'Drop .cfg files to load',
@@ -114,6 +115,7 @@ const I18N = {
     wiki_link: 'OpenTTD-wikin ↗',
     search_placeholder: 'Sök inställning…',
     show_advanced: 'Visa avancerade + expert',
+    live_only: 'Bara live-möjliga',
     select_group: 'Välj en grupp till vänster.',
     no_matches: 'Inga träffar.',
     drop_files: 'Släpp .cfg-filer för att ladda in',
@@ -565,6 +567,7 @@ const state = {
   currentGroup: null,
   currentSection: null, // null = show all sections in currentGroup
   showAdvanced: false,
+  liveOnly: false,
   lang: localStorage.getItem('lang') || 'en',
   search: '',
 };
@@ -811,6 +814,7 @@ function renderSettings() {
     const entries = entriesIn.filter(e => {
       if (!q && state.currentGroup && groupOf(sec, e.key) !== state.currentGroup) return false;
       if (!state.showAdvanced && effectiveCat(sec, e) !== 'basic') return false;
+      if (state.liveOnly && e.change !== 'live') return false;
       if (q) {
         const hay = (e.key + ' ' + (e.label || '') + ' ' + (e.help || '')).toLowerCase();
         if (!hay.includes(q)) return false;
@@ -1182,6 +1186,10 @@ function init() {
   });
   $('#show-advanced').addEventListener('change', e => {
     state.showAdvanced = e.target.checked;
+    renderSettings();
+  });
+  $('#live-only').addEventListener('change', e => {
+    state.liveOnly = e.target.checked;
     renderSettings();
   });
   $('#upload').addEventListener('change', async e => {
