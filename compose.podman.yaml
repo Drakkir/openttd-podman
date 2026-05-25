@@ -1,0 +1,18 @@
+# Podman rootless override. Combine with the base file:
+#
+#   podman-compose -f compose.yaml -f compose.podman.yaml up -d
+#
+# `userns_mode: keep-id` maps the container's uid/gid to your host
+# uid/gid in the user namespace, so files in ./data are owned by your
+# real user instead of a subuid (which would look like uid 100999 etc.
+# in `ls`). Docker doesn't accept this value — that's why it lives
+# in this override instead of the base file.
+
+services:
+  openttd:
+    userns_mode: keep-id
+    user: "1000:1000"
+
+  api:
+    userns_mode: keep-id
+    user: "1000:1000"

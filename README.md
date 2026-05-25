@@ -35,7 +35,13 @@ If you don't have a strong preference: compose is simpler to get going. Quadlet 
 ```sh
 git clone git@github.com:Drakkir/openttd-podman.git
 cd openttd-podman
-podman-compose up -d
+podman-compose up -d            # or: docker compose up -d
+```
+
+The compose file is portable and works with both. For rootless **podman** specifically, add the override so files in `./data/` are owned by your real user instead of a subuid:
+
+```sh
+podman-compose -f compose.yaml -f compose.podman.yaml up -d
 ```
 
 First run builds two images (~2–3 min):
