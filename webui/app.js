@@ -56,6 +56,10 @@ const I18N = {
     change_restart_long: 'Flagged NoNetwork in OpenTTD — cannot be modified via rcon on a network server. Edit the cfg and restart the server.',
     change_live: 'live',
     change_live_long: 'Can be applied immediately via the admin port without restarting the server.',
+    refresh_live: 'Refresh from live',
+    refresh_live_long: 'Query the server\'s actual in-memory values via the admin port. Slower than the auto-load from cfg, but reflects exactly what OpenTTD is running now.',
+    refresh_live_done: n => `Updated ${n} value(s) from the live server.`,
+    refresh_live_failed: 'Live refresh failed: ',
     apply_live: 'Apply live',
     apply_live_done: applied => `Applied ${applied} change(s) live.`,
     apply_live_failed: 'Live apply failed: ',
@@ -124,6 +128,10 @@ const I18N = {
     change_restart_long: 'Flaggad NoNetwork i OpenTTD — kan inte ändras via rcon på en nätverksserver. Redigera cfg och starta om servern.',
     change_live: 'live',
     change_live_long: 'Kan appliceras direkt via admin-porten utan att starta om servern.',
+    refresh_live: 'Hämta live-värden',
+    refresh_live_long: 'Hämta serverns faktiska in-memory-värden via admin-porten. Långsammare än auto-load från cfg, men visar exakt vad OpenTTD kör just nu.',
+    refresh_live_done: n => `Uppdaterade ${n} värde(n) från servern.`,
+    refresh_live_failed: 'Live-hämtning misslyckades: ',
     apply_live: 'Applicera live',
     apply_live_done: applied => `Applicerade ${applied} ändring(ar) live.`,
     apply_live_failed: 'Live-applicering misslyckades: ',
@@ -186,6 +194,8 @@ function applyI18N() {
   if (search) search.placeholder = T('search_placeholder');
   const drop = document.querySelector('.drop-card');
   if (drop) drop.textContent = T('drop_files');
+  const refreshLiveBtn = document.getElementById('refresh-live');
+  if (refreshLiveBtn) refreshLiveBtn.title = T('refresh_live_long');
   const apiStatus = document.getElementById('api-status');
   if (apiStatus) {
     apiStatus.title = apiStatus.classList.contains('online') ? T('api_online') : T('api_offline');
@@ -1038,6 +1048,7 @@ async function pingApi() {
     $('#apply-restart').disabled = false;
     $('#fresh-start').disabled = false;
     $('#apply-live').disabled = false;
+    $('#refresh-live').disabled = false;
     if (!initialLoadDone) {
       initialLoadDone = true;
       loadFromServer();
@@ -1049,6 +1060,51 @@ async function pingApi() {
     $('#apply-restart').disabled = true;
     $('#fresh-start').disabled = true;
     $('#apply-live').disabled = true;
+    $('#refresh-live').disabled = true;
+  }
+}
+
+async function refreshLive() {
+  const keys = [];
+  for (const [sec, entries] of Object.entries(SCHEMA)) {
+    for (const e of entries) keys.push(sec + '.' + e.key);
+  }
+  try {
+    const r = await fetch('/api/live-values', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ keys }),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'HTTP ' + r.status);
+    let updated = 0;
+    if (!state.loaded) state.loaded = {};
+    for (const [k, raw] of Object.entries(data.values)) {
+      const dot = k.indexOf('.');
+      const sec = k.slice(0, dot);
+      const key = k.slice(dot + 1);
+      const entry = (SCHEMA[sec] || []).find(e => e.key === key);
+      if (!entry) continue;
+      let v;
+      if (entry.type === 'bool') v = raw === 'true' || raw === '1' || raw === 'on';
+      else if (entry.type === 'int') v = Number(raw);
+      else if (entry.type === 'enum') {
+        // Server returns either the value label or an integer
+        const asNum = Number(raw);
+        if (!Number.isNaN(asNum) && asNum < (entry.values || []).length) v = asNum;
+        else {
+          const idx = (entry.values || []).findIndex(x => x.toLowerCase() === raw.toLowerCase());
+          v = idx >= 0 ? idx : 0;
+        }
+      } else v = raw;
+      state.values[k] = v;
+      state.loaded[k] = v;
+      updated++;
+    }
+    renderSettings();
+    flash(T('refresh_live_done', updated));
+  } catch (e) {
+    flash(T('refresh_live_failed') + e.message);
   }
 }
 
@@ -1276,6 +1332,7 @@ function init() {
   $('#dl-secrets').addEventListener('click', () => downloadCfg('secrets'));
   $('#server-save').addEventListener('click', saveToServer);
   $('#apply-live').addEventListener('click', applyLive);
+  $('#refresh-live').addEventListener('click', refreshLive);
   $('#apply-restart').addEventListener('click', applyAndRestart);
   $('#fresh-start').addEventListener('click', freshStart);
   pingApi();

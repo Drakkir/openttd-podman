@@ -4,7 +4,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const { rconQuit, rconSaveAndQuit, rconCommands } = require('./admin');
+const { rconQuit, rconSaveAndQuit, rconCommands, rconQuery } = require('./admin');
 
 const OPENTTD_HOST = process.env.OPENTTD_HOST || 'openttd';
 const OPENTTD_ADMIN_PORT = parseInt(process.env.OPENTTD_ADMIN_PORT || '3977', 10);
@@ -55,6 +55,49 @@ const server = http.createServer(async (req, res) => {
   try {
     if (req.url === '/api/health') {
       return send(res, 200, JSON.stringify({ ok: true, data_dir: DATA_DIR }), 'application/json');
+    }
+    if (req.url === '/api/live-values' && req.method === 'POST') {
+      const adminPw = readAdminPassword();
+      if (!adminPw) {
+        return send(res, 500, JSON.stringify({
+          ok: false,
+          error: 'admin_password not set in secrets.cfg',
+        }), 'application/json');
+      }
+      const body = JSON.parse(await readBody(req));
+      const keys = Array.isArray(body.keys) ? body.keys : [];
+      if (keys.length === 0) {
+        return send(res, 200, JSON.stringify({ ok: true, values: {} }), 'application/json');
+      }
+      const commands = keys.map(k => 'setting ' + k);
+      let outputs;
+      try {
+        outputs = await rconQuery({
+          host: OPENTTD_HOST,
+          port: OPENTTD_ADMIN_PORT,
+          password: adminPw,
+        }, commands, { timeoutMs: 60_000 });
+      } catch (err) {
+        return send(res, 502, JSON.stringify({
+          ok: false,
+          error: 'admin port error: ' + err.message,
+        }), 'application/json');
+      }
+      // Parse each output. OpenTTD prints:
+      //   "Current value for 'network.max_clients' is '25' (min: 2, max: 255, def: 25)."
+      const values = {};
+      const re = /Current value for '([^']+)' is '([^']*)'/;
+      for (let i = 0; i < keys.length; i++) {
+        for (const line of outputs[i]) {
+          const m = line.match(re);
+          if (m && m[1] === keys[i]) {
+            values[keys[i]] = m[2];
+            break;
+          }
+        }
+      }
+      console.log(`[${new Date().toISOString()}] live-values: ${keys.length} queried, ${Object.keys(values).length} parsed`);
+      return send(res, 200, JSON.stringify({ ok: true, values }), 'application/json');
     }
     if (req.url === '/api/apply-live' && req.method === 'POST') {
       const adminPw = readAdminPassword();
