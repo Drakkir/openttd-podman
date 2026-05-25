@@ -681,7 +681,8 @@ function currentVal(section, entry) {
 function isModified(section, entry) {
   const k = valKey(section, entry.key);
   if (!(k in state.values)) return false;
-  return state.values[k] !== entry.def;
+  const baseline = state.loaded && k in state.loaded ? state.loaded[k] : entry.def;
+  return state.values[k] !== baseline;
 }
 
 function renderNav() {
@@ -910,6 +911,9 @@ async function applyFiles(files) {
 }
 
 function applyParsedIni(sections) {
+  // Remember the baseline so collectModifiedSettings can detect user edits
+  // relative to what was loaded.
+  state.loaded = {};
   state.values = {};
   state.unknown = {};
   state.unknownSections = {};
@@ -935,6 +939,7 @@ function applyParsedIni(sections) {
         v = idx >= 0 ? idx : Number(raw) || 0;
       } else v = raw.replace(/^"(.*)"$/, '$1');
       state.values[valKey(sec, k)] = v;
+      state.loaded[valKey(sec, k)] = v;
     }
   }
   renderSettings();
@@ -1017,7 +1022,9 @@ function serializeValueForRcon(entry, v) {
 }
 
 function collectModifiedSettings() {
-  // Returns [{section, key, value, entry}, ...] for everything different from default.
+  // Returns [{section, key, value, entry}, ...] for settings the user changed
+  // compared to whatever we last loaded (or defaults if never loaded).
+  const baseline = state.loaded || {};
   const out = [];
   for (const [k, v] of Object.entries(state.values)) {
     const dot = k.indexOf('.');
@@ -1026,7 +1033,8 @@ function collectModifiedSettings() {
     const key = k.slice(dot + 1);
     const entry = (SCHEMA[section] || []).find(e => e.key === key);
     if (!entry) continue;
-    if (v === entry.def) continue;
+    const reference = k in baseline ? baseline[k] : entry.def;
+    if (v === reference) continue;
     out.push({ section, key, value: v, entry });
   }
   return out;
