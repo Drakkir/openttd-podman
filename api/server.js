@@ -65,9 +65,19 @@ const server = http.createServer(async (req, res) => {
         }), 'application/json');
       }
       const body = JSON.parse(await readBody(req));
+      // Stage cfg files first so disk reflects what's in the editor — this
+      // matters because OpenTTD's in-memory state and our .cfg files would
+      // otherwise drift after live changes, and a page refresh would read
+      // stale cfg back into the UI.
+      for (const target of ['openttd', 'private', 'secrets']) {
+        if (typeof body[target] !== 'string') continue;
+        const staged = path.join(DATA_DIR, target + '.cfg.staged');
+        await fs.promises.writeFile(staged + '.tmp', body[target], 'utf-8');
+        await fs.promises.rename(staged + '.tmp', staged);
+      }
       const settings = Array.isArray(body.settings) ? body.settings : [];
       if (settings.length === 0) {
-        return send(res, 200, JSON.stringify({ ok: true, applied: 0 }), 'application/json');
+        return send(res, 200, JSON.stringify({ ok: true, applied: 0, staged: true }), 'application/json');
       }
       // Build rcon commands. Most settings use `setting <name> <value>`.
       // A few have dedicated commands (server_name, server_password, rcon_password).

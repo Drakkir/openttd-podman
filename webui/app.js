@@ -1065,18 +1065,28 @@ async function applyLive() {
     key: m.key,
     value: serializeValueForRcon(m.entry, m.value),
   }));
-  if (settings.length === 0) {
-    flash(T('apply_live_nothing'));
-    return;
-  }
   try {
     const r = await fetch('/api/apply-live', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ settings }),
+      body: JSON.stringify({
+        // Stage all three cfgs so disk matches the editor; live settings get
+        // rcon'd in addition so OpenTTD's memory reflects the change now.
+        openttd: serializeCfg('openttd'),
+        private: serializeCfg('private'),
+        secrets: serializeCfg('secrets'),
+        settings,
+      }),
     });
     const data = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
+    // Update baseline so the just-applied settings are no longer flagged as
+    // "modified" in the editor (matches the new on-disk state).
+    if (!state.loaded) state.loaded = {};
+    for (const m of modified) {
+      state.loaded[valKey(m.section, m.key)] = m.value;
+    }
+    document.querySelectorAll('.setting.modified').forEach(c => c.classList.remove('modified'));
     flash(T('apply_live_done', data.applied ?? settings.length));
   } catch (e) {
     flash(T('apply_live_failed') + e.message);
