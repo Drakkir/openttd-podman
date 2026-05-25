@@ -1,8 +1,16 @@
-# podman-compose deployment.
+# Portable compose file. Works with `docker compose` and `podman-compose`.
+#
+# `user: "1000:1000"` makes the openttd/api containers write files owned
+# by uid/gid 1000 on the host — matches a typical single-user Linux box.
+# If your host uid differs, edit those lines.
+#
 # Alternative: systemd quadlet units (openttd.container, webui.container,
 # api.container, openttd.network). Don't run both — same names and ports.
 # Keep this file in sync with the .container/.network files when changing
 # images, ports, or volumes.
+#
+# For rootless podman with cleaner subuid handling, also pass:
+#   podman-compose -f compose.yaml -f compose.podman.yaml up
 
 services:
   openttd:
@@ -15,7 +23,7 @@ services:
       - "3979:3979/udp"
     volumes:
       - ./data:/data
-    userns_mode: keep-id
+    user: "1000:1000"
 
   api:
     build: ./api
@@ -24,7 +32,7 @@ services:
     restart: unless-stopped
     volumes:
       - ./data:/data
-    userns_mode: keep-id
+    user: "1000:1000"
     environment:
       DATA_DIR: /data/.config/openttd
 
