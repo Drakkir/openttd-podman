@@ -630,9 +630,9 @@ function flash(msg) {
   s.textContent = msg;
   s.classList.add('show');
   clearTimeout(flash._t);
-  // Scale duration with message length: 80ms/char on top of a 3s floor,
-  // capped at 12s. Click anywhere on the toast to dismiss early.
-  const ms = Math.min(12000, 3000 + msg.length * 80);
+  // Scale duration with message length: 40ms/char on top of a 2s floor,
+  // capped at 8s. Click anywhere on the toast to dismiss early.
+  const ms = Math.min(8000, 2000 + msg.length * 40);
   flash._t = setTimeout(() => s.classList.remove('show'), ms);
   s.onclick = () => s.classList.remove('show');
 }
