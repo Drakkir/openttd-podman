@@ -1,0 +1,32 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s *)",
+      "Bash(curl -sS *)",
+      "Bash(curl -sL *)",
+      "Bash(curl -sf *)",
+      "Bash(curl -sI *)",
+      "Bash(curl -sLo *)",
+      "Bash(systemctl --user is-active *)",
+      "Bash(systemctl --user is-enabled *)",
+      "Bash(systemctl --user status *)",
+      "Bash(systemctl --user cat *)",
+      "Bash(systemctl --user list-unit-files *)",
+      "Bash(systemctl --user list-units *)",
+      "Bash(systemctl --user show *)",
+      "Bash(journalctl *)",
+      "Bash(podman logs *)",
+      "Bash(podman ps *)",
+      "Bash(podman inspect *)",
+      "Bash(podman images *)",
+      "Bash(paru -Ss *)",
+      "Bash(paru -Si *)",
+      "Bash(paru -Qi *)",
+      "Bash(paru -Qs *)",
+      "Bash(ollama list)",
+      "Bash(ollama ps)",
+      "Bash(ollama show *)",
+      "Bash(command -v *)"
+    ]
+  }
+}
