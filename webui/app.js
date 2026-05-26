@@ -1047,7 +1047,9 @@ async function pingApi() {
     $('#refresh-live').disabled = false;
     if (!initialLoadDone) {
       initialLoadDone = true;
-      loadFromServer();
+      // Prefer live in-memory state; fall back to cfg files if admin port
+      // isn't reachable (e.g. admin_password missing).
+      refreshLive({ silent: true }).catch(() => loadFromServer());
     }
   } catch {
     ind.classList.remove('online');
@@ -1060,48 +1062,47 @@ async function pingApi() {
   }
 }
 
-async function refreshLive() {
+async function refreshLive({ silent = false } = {}) {
   const keys = [];
   for (const [sec, entries] of Object.entries(SCHEMA)) {
     for (const e of entries) keys.push(sec + '.' + e.key);
   }
-  try {
-    const r = await fetch('/api/live-values', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ keys }),
-    });
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.error || 'HTTP ' + r.status);
-    let updated = 0;
-    if (!state.loaded) state.loaded = {};
-    for (const [k, raw] of Object.entries(data.values)) {
-      const dot = k.indexOf('.');
-      const sec = k.slice(0, dot);
-      const key = k.slice(dot + 1);
-      const entry = (SCHEMA[sec] || []).find(e => e.key === key);
-      if (!entry) continue;
-      let v;
-      if (entry.type === 'bool') v = raw === 'true' || raw === '1' || raw === 'on';
-      else if (entry.type === 'int') v = Number(raw);
-      else if (entry.type === 'enum') {
-        // Server returns either the value label or an integer
-        const asNum = Number(raw);
-        if (!Number.isNaN(asNum) && asNum < (entry.values || []).length) v = asNum;
-        else {
-          const idx = (entry.values || []).findIndex(x => x.toLowerCase() === raw.toLowerCase());
-          v = idx >= 0 ? idx : 0;
-        }
-      } else v = raw;
-      if (state.values[k] !== v) updated++;
-      state.values[k] = v;
-      state.loaded[k] = v;
-    }
-    renderSettings();
-    flash(T('refresh_live_done', updated));
-  } catch (e) {
-    flash(T('refresh_live_failed') + e.message);
+  const r = await fetch('/api/live-values', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ keys }),
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    const msg = data.error || ('HTTP ' + r.status);
+    if (!silent) flash(T('refresh_live_failed') + msg);
+    throw new Error(msg);
   }
+  let updated = 0;
+  if (!state.loaded) state.loaded = {};
+  for (const [k, raw] of Object.entries(data.values)) {
+    const dot = k.indexOf('.');
+    const sec = k.slice(0, dot);
+    const key = k.slice(dot + 1);
+    const entry = (SCHEMA[sec] || []).find(e => e.key === key);
+    if (!entry) continue;
+    let v;
+    if (entry.type === 'bool') v = raw === 'true' || raw === '1' || raw === 'on';
+    else if (entry.type === 'int') v = Number(raw);
+    else if (entry.type === 'enum') {
+      const asNum = Number(raw);
+      if (!Number.isNaN(asNum) && asNum < (entry.values || []).length) v = asNum;
+      else {
+        const idx = (entry.values || []).findIndex(x => x.toLowerCase() === raw.toLowerCase());
+        v = idx >= 0 ? idx : 0;
+      }
+    } else v = raw;
+    if (state.values[k] !== v) updated++;
+    state.values[k] = v;
+    state.loaded[k] = v;
+  }
+  renderSettings();
+  if (!silent) flash(T('refresh_live_done', updated));
 }
 
 function serializeValueForRcon(entry, v) {
@@ -1328,7 +1329,7 @@ function init() {
   $('#dl-secrets').addEventListener('click', () => downloadCfg('secrets'));
   $('#server-save').addEventListener('click', saveToServer);
   $('#apply-live').addEventListener('click', applyLive);
-  $('#refresh-live').addEventListener('click', refreshLive);
+  $('#refresh-live').addEventListener('click', () => { refreshLive().catch(() => {}); });
   $('#status-close').addEventListener('click', dismissFlash);
   $('#apply-restart').addEventListener('click', applyAndRestart);
   $('#fresh-start').addEventListener('click', freshStart);
