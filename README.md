@@ -38,9 +38,10 @@ cd openttd-podman
 podman-compose up -d            # or: docker compose up -d
 ```
 
-The compose file is portable and works with both. For rootless **podman** specifically, add the override so files in `./data/` are owned by your real user instead of a subuid:
+The compose file is portable and works with both. For rootless **podman** specifically, add the override so files in `./data/` are owned by your real user instead of a subuid, and the api can auto-start a stopped openttd container when you click "Start fresh game":
 
 ```sh
+systemctl --user enable --now podman.socket    # one-time, for auto-start
 podman-compose -f compose.yaml -f compose.podman.yaml up -d
 ```
 

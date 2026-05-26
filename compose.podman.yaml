@@ -16,3 +16,9 @@ services:
   api:
     userns_mode: keep-id
     user: "1000:1000"
+    # Optional: mount the podman socket so the api can start a stopped
+    # openttd container when the user clicks "Start fresh game". Without
+    # this, the sentinel + staged cfg still get written, but the user has
+    # to bring the container up manually.
+    volumes:
+      - ${PODMAN_SOCKET:-/run/user/1000/podman/podman.sock}:/var/run/container.sock

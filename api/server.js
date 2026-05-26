@@ -10,6 +10,42 @@ const { WebSocketServer } = require('ws');
 
 const OPENTTD_HOST = process.env.OPENTTD_HOST || 'openttd';
 const OPENTTD_ADMIN_PORT = parseInt(process.env.OPENTTD_ADMIN_PORT || '3977', 10);
+const CONTAINER_NAME = process.env.OPENTTD_CONTAINER_NAME || 'openttd';
+
+// Detect a mounted container engine socket (podman or docker, in that order).
+const SOCKET_CANDIDATES = [
+  '/var/run/container.sock',
+  '/var/run/podman.sock',
+  '/run/podman/podman.sock',
+  '/var/run/docker.sock',
+];
+const CONTAINER_SOCKET = SOCKET_CANDIDATES.find(p => {
+  try { fs.accessSync(p, fs.constants.R_OK | fs.constants.W_OK); return true; }
+  catch { return false; }
+}) || null;
+if (CONTAINER_SOCKET) console.log('Container socket:', CONTAINER_SOCKET);
+else console.log('No container socket mounted; cannot start a stopped server');
+
+function startContainer(name) {
+  return new Promise((resolve, reject) => {
+    if (!CONTAINER_SOCKET) return reject(new Error('no container socket'));
+    const req = http.request({
+      socketPath: CONTAINER_SOCKET,
+      method: 'POST',
+      path: `/containers/${encodeURIComponent(name)}/start`,
+      headers: { Host: 'container-engine' },
+    }, res => {
+      let body = '';
+      res.on('data', c => body += c);
+      res.on('end', () => {
+        if (res.statusCode === 204 || res.statusCode === 304) resolve({ already: res.statusCode === 304 });
+        else reject(new Error(`start ${name}: HTTP ${res.statusCode} ${body.slice(0, 200)}`));
+      });
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
 
 function readAdminPassword() {
   try {
@@ -221,14 +257,26 @@ const server = http.createServer(async (req, res) => {
         });
         return send(res, 200, JSON.stringify({ ok: true, sentinel, quit: true }), 'application/json');
       } catch (err) {
-        // Server unreachable (probably stopped) — sentinel will still apply
-        // whenever the server starts next. This is a success from the user's
-        // perspective: their changes are queued.
+        // Admin unreachable. If a container socket is mounted, try to start
+        // the container directly — restart policy + sentinel will do the rest.
+        if (CONTAINER_SOCKET) {
+          try {
+            const r2 = await startContainer(CONTAINER_NAME);
+            return send(res, 200, JSON.stringify({
+              ok: true, sentinel, quit: false, started: !r2.already,
+            }), 'application/json');
+          } catch (e2) {
+            return send(res, 200, JSON.stringify({
+              ok: true, sentinel, quit: false,
+              note: 'sentinel staged; tried to start container but failed (' + e2.message + '). Start it manually.',
+            }), 'application/json');
+          }
+        }
         return send(res, 200, JSON.stringify({
           ok: true,
           sentinel,
           quit: false,
-          note: 'sentinel staged; server admin port unreachable (' + err.message + '). Start the container to apply.',
+          note: 'sentinel staged; admin port unreachable (' + err.message + '). Start the container to apply.',
         }), 'application/json');
       }
     }
