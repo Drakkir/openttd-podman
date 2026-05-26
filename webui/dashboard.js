@@ -121,4 +121,26 @@ function connect() {
   ws.onerror = () => { /* close handler will reconnect */ };
 }
 
+async function refreshMap() {
+  const btn = $('#refresh-map');
+  btn.disabled = true;
+  btn.textContent = '…';
+  try {
+    const r = await fetch('/api/map-screenshot', { method: 'POST' });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || 'HTTP ' + r.status);
+    const img = $('#map-img');
+    img.src = '/api/screenshot/live-map.png?t=' + (data.ts || Date.now());
+    img.hidden = false;
+    $('#map-empty').classList.add('hidden');
+  } catch (e) {
+    $('#map-empty').textContent = 'Map snapshot failed: ' + e.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Refresh';
+  }
+}
+
+$('#refresh-map').addEventListener('click', refreshMap);
+
 connect();

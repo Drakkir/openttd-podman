@@ -18,6 +18,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY entrypoint.sh /opt/entrypoint.sh
+COPY defaults /opt/defaults
 RUN chmod +x /opt/entrypoint.sh
 
 RUN useradd -u 1000 -m -d /data -s /usr/sbin/nologin openttd

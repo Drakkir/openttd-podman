@@ -94,6 +94,42 @@ const server = http.createServer(async (req, res) => {
     if (req.url === '/api/health') {
       return send(res, 200, JSON.stringify({ ok: true, data_dir: DATA_DIR }), 'application/json');
     }
+    if (req.url === '/api/map-screenshot' && req.method === 'POST') {
+      const adminPw = readAdminPassword();
+      if (!adminPw) {
+        return send(res, 500, JSON.stringify({
+          ok: false,
+          error: 'admin_password not set in secrets.cfg',
+        }), 'application/json');
+      }
+      try {
+        await rconCommands({
+          host: OPENTTD_HOST,
+          port: OPENTTD_ADMIN_PORT,
+          password: adminPw,
+        }, ['screenshot minimap live-map'], { expectClose: false, timeoutMs: 30_000 });
+      } catch (err) {
+        return send(res, 502, JSON.stringify({
+          ok: false, error: 'rcon error: ' + err.message,
+        }), 'application/json');
+      }
+      // Wait a moment for openttd to flush the PNG.
+      await new Promise(r => setTimeout(r, 500));
+      return send(res, 200, JSON.stringify({ ok: true, ts: Date.now() }), 'application/json');
+    }
+    if (req.url.startsWith('/api/screenshot/') && req.method === 'GET') {
+      const m = req.url.match(/^\/api\/screenshot\/([\w\-\.]+)(?:\?.*)?$/);
+      if (!m) return send(res, 400, 'bad name');
+      const file = path.join(DATA_ROOT, '.local/share/openttd/screenshot', m[1]);
+      try {
+        const data = await fs.promises.readFile(file);
+        res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'no-store' });
+        res.end(data);
+        return;
+      } catch (e) {
+        return send(res, 404, 'not found');
+      }
+    }
     if (req.url === '/api/live-values' && req.method === 'POST') {
       const adminPw = readAdminPassword();
       if (!adminPw) {
