@@ -5,6 +5,8 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { rconQuit, rconSaveAndQuit, rconCommands, rconQuery } = require('./admin');
+const { LiveAdmin } = require('./live');
+const { WebSocketServer } = require('ws');
 
 const OPENTTD_HOST = process.env.OPENTTD_HOST || 'openttd';
 const OPENTTD_ADMIN_PORT = parseInt(process.env.OPENTTD_ADMIN_PORT || '3977', 10);
@@ -252,6 +254,32 @@ const server = http.createServer(async (req, res) => {
   } catch (err) {
     console.error(err);
     return send(res, 500, 'internal error: ' + err.message);
+  }
+});
+
+// Live state + WebSocket fan-out.
+let latestState = null;
+const wss = new WebSocketServer({ noServer: true });
+const live = new LiveAdmin({
+  host: OPENTTD_HOST,
+  port: OPENTTD_ADMIN_PORT,
+  dataDir: DATA_DIR,
+  onState: state => {
+    latestState = state;
+    const msg = JSON.stringify({ type: 'state', state });
+    for (const client of wss.clients) {
+      if (client.readyState === client.OPEN) client.send(msg);
+    }
+  },
+});
+wss.on('connection', ws => {
+  if (latestState) ws.send(JSON.stringify({ type: 'state', state: latestState }));
+});
+server.on('upgrade', (req, socket, head) => {
+  if (req.url === '/api/live-ws') {
+    wss.handleUpgrade(req, socket, head, ws => wss.emit('connection', ws, req));
+  } else {
+    socket.destroy();
   }
 });
 

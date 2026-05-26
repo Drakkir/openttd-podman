@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenTTD Dashboard</title>
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="dashboard.css">
+</head>
+<body>
+<header>
+  <h1>OpenTTD Dashboard</h1>
+  <div class="actions">
+    <span id="conn-status" class="api-status">●</span>
+    <a class="btn" href="./">⚙ Config editor</a>
+  </div>
+</header>
+<main class="dash">
+  <section class="card">
+    <h2>Server</h2>
+    <div id="server-info">—</div>
+  </section>
+  <section class="card">
+    <h2>Players <span id="player-count" class="count">0</span></h2>
+    <table id="players">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Name</th>
+          <th>Company</th>
+          <th>From</th>
+          <th>Joined</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+    <p id="no-players" class="empty">No players connected.</p>
+  </section>
+</main>
+<script src="dashboard.js"></script>
+</body>
+</html>

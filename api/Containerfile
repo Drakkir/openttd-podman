@@ -1,7 +1,9 @@
 FROM docker.io/node:20-alpine
 
 WORKDIR /app
-COPY server.js admin.js ./
+COPY package.json ./
+RUN npm install --omit=dev --no-audit --no-fund
+COPY server.js admin.js live.js ./
 
 USER node
 EXPOSE 3000
