@@ -188,14 +188,7 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, JSON.stringify({ ok: true }), 'application/json');
     }
     if (req.url === '/api/fresh-start' && req.method === 'POST') {
-      const adminPw = readAdminPassword();
-      if (!adminPw) {
-        return send(res, 500, JSON.stringify({
-          ok: false,
-          error: 'admin_password not set in secrets.cfg',
-        }), 'application/json');
-      }
-      // Stage cfg if provided (so the user's pending edits win after restart).
+      // Stage cfg if provided (so the user's pending edits win after start).
       const body = await readBody(req);
       if (body) {
         const parsed = JSON.parse(body);
@@ -208,21 +201,36 @@ const server = http.createServer(async (req, res) => {
       }
       const sentinel = path.join(DATA_ROOT, '.no-resume');
       await fs.promises.writeFile(sentinel, 'set ' + new Date().toISOString() + '\n');
-      console.log(`[${new Date().toISOString()}] sentinel + staged cfg ready, sending quit`);
+      console.log(`[${new Date().toISOString()}] sentinel + staged cfg ready`);
+
+      const adminPw = readAdminPassword();
+      if (!adminPw) {
+        // No admin pw → can't quit, but sentinel + cfg are staged.
+        return send(res, 200, JSON.stringify({
+          ok: true,
+          sentinel,
+          quit: false,
+          note: 'sentinel staged; admin_password not set so could not signal a running server to quit',
+        }), 'application/json');
+      }
       try {
         await rconQuit({
           host: OPENTTD_HOST,
           port: OPENTTD_ADMIN_PORT,
           password: adminPw,
         });
+        return send(res, 200, JSON.stringify({ ok: true, sentinel, quit: true }), 'application/json');
       } catch (err) {
-        return send(res, 502, JSON.stringify({
-          ok: false,
-          error: 'sentinel set but could not reach admin port: ' + err.message,
-          hint: 'check allow_insecure_admin_login = true in openttd.cfg; sentinel will still apply on next manual restart',
+        // Server unreachable (probably stopped) — sentinel will still apply
+        // whenever the server starts next. This is a success from the user's
+        // perspective: their changes are queued.
+        return send(res, 200, JSON.stringify({
+          ok: true,
+          sentinel,
+          quit: false,
+          note: 'sentinel staged; server admin port unreachable (' + err.message + '). Start the container to apply.',
         }), 'application/json');
       }
-      return send(res, 200, JSON.stringify({ ok: true, sentinel }), 'application/json');
     }
     const m = req.url.match(/^\/api\/cfg\/(openttd|private|secrets)$/);
     if (!m) return send(res, 404, 'not found');

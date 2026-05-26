@@ -48,6 +48,7 @@ const I18N = {
     fresh_start: 'Start fresh game',
     fresh_start_confirm: 'The server will quit and restart with the current settings, skipping any autosave. Old autosaves stay on disk (rotation will eventually overwrite them). Proceed?',
     fresh_start_done: 'Server restarting fresh…',
+    fresh_start_staged_only: 'Sentinel + cfg staged. Start the openttd container to apply.',
     offline_tools: 'Offline tools',
     offline_tools_hint: 'Download cfg files for manual edit / backup. The live "Save + restart" above is the preferred flow.',
     change_newgame: 'needs new game',
@@ -120,6 +121,7 @@ const I18N = {
     fresh_start: 'Starta nytt spel',
     fresh_start_confirm: 'Servern avslutas och startar om med nuvarande inställningar, autosaves hoppas över. Gamla autosaves ligger kvar på disk (rotationen skriver så småningom över dem). Fortsätta?',
     fresh_start_done: 'Servern startar om till nytt spel…',
+    fresh_start_staged_only: 'Sentinel + cfg stagade. Starta openttd-containern för att applicera.',
     offline_tools: 'Offline-verktyg',
     offline_tools_hint: 'Ladda ner cfg-filer för manuell editering / backup. "Spara + starta om" ovan är det rekommenderade flödet.',
     change_newgame: 'kräver nytt spel',
@@ -1236,11 +1238,10 @@ async function freshStart() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    if (!r.ok) {
-      const data = await r.json().catch(() => ({}));
-      throw new Error(data.error || ('HTTP ' + r.status));
-    }
-    flash(T('fresh_start_done'));
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
+    if (data.quit) flash(T('fresh_start_done'));
+    else flash(T('fresh_start_staged_only') + (data.note ? ' (' + data.note + ')' : ''));
   } catch (e) {
     flash(T('save_failed') + e.message);
   }
