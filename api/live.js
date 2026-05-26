@@ -30,6 +30,7 @@ const PKT_SERVER_COMPANY_NEW = 113;
 const PKT_SERVER_COMPANY_INFO = 114;
 const PKT_SERVER_COMPANY_UPDATE = 115;
 const PKT_SERVER_COMPANY_REMOVE = 116;
+const PKT_SERVER_COMPANY_ECONOMY = 117;
 
 const UPDATE_DATE = 0;
 const UPDATE_CLIENT_INFO = 1;
@@ -37,6 +38,8 @@ const UPDATE_COMPANY_INFO = 2;
 const UPDATE_COMPANY_ECONOMY = 3;
 
 const FREQ_POLL = 0x01;
+const FREQ_WEEKLY = 0x04;
+const FREQ_MONTHLY = 0x08;
 const FREQ_AUTOMATIC = 0x40;
 
 // Stream-based packet reader for null-terminated strings + integers.
@@ -177,8 +180,10 @@ class LiveAdmin {
         // Subscribe to live client + company updates, then poll initial state.
         this.sock.write(updateFreqPacket(UPDATE_CLIENT_INFO, FREQ_AUTOMATIC));
         this.sock.write(updateFreqPacket(UPDATE_COMPANY_INFO, FREQ_AUTOMATIC));
+        this.sock.write(updateFreqPacket(UPDATE_COMPANY_ECONOMY, FREQ_MONTHLY | FREQ_WEEKLY));
         this.sock.write(pollPacket(UPDATE_CLIENT_INFO));
         this.sock.write(pollPacket(UPDATE_COMPANY_INFO));
+        this.sock.write(pollPacket(UPDATE_COMPANY_ECONOMY));
         break;
       }
       case PKT_SERVER_DATE:
@@ -246,6 +251,26 @@ class LiveAdmin {
       case PKT_SERVER_COMPANY_REMOVE: {
         const id = r.u8();
         delete this.state.companies[id];
+        this.emitState();
+        break;
+      }
+      case PKT_SERVER_COMPANY_ECONOMY: {
+        const id = r.u8();
+        const money = r.i64();
+        const loan = r.i64();
+        const income = r.i64();
+        const cargo = r.u16();
+        const history = [];
+        for (let i = 0; i < 2; i++) {
+          history.push({
+            value: r.i64(),
+            performance: r.u16(),
+            cargo: r.u16(),
+          });
+        }
+        const co = this.state.companies[id] || { id };
+        co.economy = { money, loan, income, cargo, history };
+        this.state.companies[id] = co;
         this.emitState();
         break;
       }

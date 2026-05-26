@@ -39,6 +39,15 @@ function fmtCompany(id) {
   return 'company ' + (id + 1);
 }
 
+function fmtMoney(v) {
+  if (v == null) return '—';
+  const abs = Math.abs(v);
+  if (abs >= 1e9) return (v / 1e9).toFixed(2) + 'B';
+  if (abs >= 1e6) return (v / 1e6).toFixed(2) + 'M';
+  if (abs >= 1e3) return (v / 1e3).toFixed(0) + 'k';
+  return String(v);
+}
+
 function renderState(state) {
   const status = $('#conn-status');
   if (state.connected) {
@@ -76,6 +85,8 @@ function renderState(state) {
   for (const co of companies) {
     const colour = COMPANY_COLOURS[co.colour] || '#999';
     const swatch = el('span', { class: 'colour-swatch', style: 'background:' + colour });
+    const econ = co.economy || {};
+    const lastYear = econ.history && econ.history[0] || {};
     cTbody.appendChild(el('tr', {},
       el('td', {}, String(co.id + 1)),
       el('td', {}, swatch),
@@ -83,6 +94,11 @@ function renderState(state) {
       el('td', {}, co.manager || '—'),
       el('td', {}, co.isAI ? 'AI' : 'Human'),
       el('td', {}, co.inauguratedYear ? String(co.inauguratedYear) : '—'),
+      el('td', { class: 'money' }, fmtMoney(econ.money)),
+      el('td', { class: 'money' }, fmtMoney(econ.loan)),
+      el('td', { class: 'money' }, fmtMoney(econ.income)),
+      el('td', { class: 'money' }, econ.cargo != null ? String(econ.cargo) : '—'),
+      el('td', {}, lastYear.performance != null ? String(lastYear.performance) : '—'),
     ));
   }
   $('#no-companies').classList.toggle('hidden', companies.length > 0);
