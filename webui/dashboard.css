@@ -49,3 +49,12 @@
 #players tr:last-child td { border-bottom: none; }
 .empty { color: #a8a29e; padding: 8px 0; }
 .empty.hidden { display: none; }
+
+.colour-swatch {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  border: 1px solid rgba(0,0,0,0.15);
+  vertical-align: middle;
+}

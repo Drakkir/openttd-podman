@@ -14,6 +14,26 @@ function el(tag, attrs = {}, ...children) {
   return e;
 }
 
+// OpenTTD company colour palette (matches Colours enum in src/core/colour.h).
+const COMPANY_COLOURS = [
+  '#465a99', // dark blue
+  '#76a55f', // pale green
+  '#8c5a64', // pink
+  '#ffe66b', // yellow
+  '#ee2b2b', // red
+  '#dddddd', // white
+  '#5a463d', // dark brown
+  '#b87842', // light brown
+  '#ff8c1f', // orange
+  '#a55cc8', // purple
+  '#b4b428', // mauve (close)
+  '#28a0a0', // dark teal
+  '#5cbcd4', // light blue
+  '#286f28', // dark green
+  '#5cbe5c', // green
+  '#1c1c1c', // dark grey/cream actually
+];
+
 function fmtCompany(id) {
   if (id === 255) return 'spectator';
   return 'company ' + (id + 1);
@@ -48,6 +68,24 @@ function renderState(state) {
     ));
   }
   $('#no-players').classList.toggle('hidden', clients.length > 0);
+
+  const companies = Object.values(state.companies || {}).sort((a, b) => a.id - b.id);
+  $('#company-count').textContent = String(companies.length);
+  const cTbody = document.querySelector('#companies tbody');
+  cTbody.innerHTML = '';
+  for (const co of companies) {
+    const colour = COMPANY_COLOURS[co.colour] || '#999';
+    const swatch = el('span', { class: 'colour-swatch', style: 'background:' + colour });
+    cTbody.appendChild(el('tr', {},
+      el('td', {}, String(co.id + 1)),
+      el('td', {}, swatch),
+      el('td', {}, co.name || '—'),
+      el('td', {}, co.manager || '—'),
+      el('td', {}, co.isAI ? 'AI' : 'Human'),
+      el('td', {}, co.inauguratedYear ? String(co.inauguratedYear) : '—'),
+    ));
+  }
+  $('#no-companies').classList.toggle('hidden', companies.length > 0);
 }
 
 function connect() {

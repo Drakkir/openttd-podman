@@ -26,6 +26,10 @@ const PKT_SERVER_CLIENT_INFO = 109;
 const PKT_SERVER_CLIENT_UPDATE = 110;
 const PKT_SERVER_CLIENT_QUIT = 111;
 const PKT_SERVER_CLIENT_ERROR = 112;
+const PKT_SERVER_COMPANY_NEW = 113;
+const PKT_SERVER_COMPANY_INFO = 114;
+const PKT_SERVER_COMPANY_UPDATE = 115;
+const PKT_SERVER_COMPANY_REMOVE = 116;
 
 const UPDATE_DATE = 0;
 const UPDATE_CLIENT_INFO = 1;
@@ -104,7 +108,8 @@ class LiveAdmin {
       serverName: null,
       serverVersion: null,
       date: null,
-      clients: {},  // id → {name, hostname, language, joinDate, company}
+      clients: {},    // id → {name, hostname, language, joinDate, company}
+      companies: {},  // id → {name, manager, colour, isAI, inauguratedYear, ...}
     };
     this.sock = null;
     this.buffered = Buffer.alloc(0);
@@ -169,9 +174,11 @@ class LiveAdmin {
         this.state.serverVersion = r.str();
         this.state.connected = true;
         this.emitState();
-        // Subscribe to live client updates + initial poll.
+        // Subscribe to live client + company updates, then poll initial state.
         this.sock.write(updateFreqPacket(UPDATE_CLIENT_INFO, FREQ_AUTOMATIC));
+        this.sock.write(updateFreqPacket(UPDATE_COMPANY_INFO, FREQ_AUTOMATIC));
         this.sock.write(pollPacket(UPDATE_CLIENT_INFO));
+        this.sock.write(pollPacket(UPDATE_COMPANY_INFO));
         break;
       }
       case PKT_SERVER_DATE:
@@ -207,9 +214,45 @@ class LiveAdmin {
         this.emitState();
         break;
       }
+      case PKT_SERVER_COMPANY_INFO: {
+        const id = r.u8();
+        const name = r.str();
+        const manager = r.str();
+        const colour = r.u8();
+        const passwordProtected = r.u8() === 1;
+        const inauguratedYear = r.u32();
+        const isAI = r.u8() === 1;
+        this.state.companies[id] = {
+          id, name, manager, colour, passwordProtected, inauguratedYear, isAI,
+        };
+        this.emitState();
+        break;
+      }
+      case PKT_SERVER_COMPANY_UPDATE: {
+        const id = r.u8();
+        const name = r.str();
+        const manager = r.str();
+        const colour = r.u8();
+        const passwordProtected = r.u8() === 1;
+        const existing = this.state.companies[id] || { id };
+        Object.assign(existing, { name, manager, colour, passwordProtected });
+        this.state.companies[id] = existing;
+        this.emitState();
+        break;
+      }
+      case PKT_SERVER_COMPANY_NEW:
+        // Wait for the full INFO frame instead of building from id alone.
+        break;
+      case PKT_SERVER_COMPANY_REMOVE: {
+        const id = r.u8();
+        delete this.state.companies[id];
+        this.emitState();
+        break;
+      }
       case PKT_SERVER_NEWGAME:
       case PKT_SERVER_SHUTDOWN:
         this.state.clients = {};
+        this.state.companies = {};
         this.emitState();
         break;
       case PKT_SERVER_FULL:
