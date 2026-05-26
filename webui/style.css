@@ -267,18 +267,29 @@ main { padding: 18px 24px; max-width: 900px; }
   right: 16px;
   max-width: 420px;
   margin: 0;
-  padding: 10px 16px;
+  padding: 10px 12px 10px 16px;
   background: #1c1917;
   color: #fafaf9;
   border-radius: 6px;
   font-size: 13px;
   line-height: 1.4;
-  opacity: 0;
-  transition: opacity 0.2s;
-  pointer-events: none;
-  cursor: pointer;
+  display: none;
+  align-items: flex-start;
+  gap: 12px;
 }
-#status.show { opacity: 1; pointer-events: auto; }
+#status.show { display: flex; }
+#status-close {
+  background: transparent;
+  border: none;
+  color: #fafaf9;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+  opacity: 0.6;
+  margin-top: -2px;
+}
+#status-close:hover { opacity: 1; }
 
 .empty {
   text-align: center;
