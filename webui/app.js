@@ -1093,9 +1093,9 @@ async function refreshLive() {
           v = idx >= 0 ? idx : 0;
         }
       } else v = raw;
+      if (state.values[k] !== v) updated++;
       state.values[k] = v;
       state.loaded[k] = v;
-      updated++;
     }
     renderSettings();
     flash(T('refresh_live_done', updated));
