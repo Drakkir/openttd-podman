@@ -37,6 +37,14 @@
     <p id="no-players" class="empty">No players connected.</p>
   </section>
   <section class="card">
+    <h2>Chat <span id="chat-count" class="count">0</span></h2>
+    <div id="chat-log"></div>
+    <form id="chat-form" autocomplete="off">
+      <input id="chat-input" type="text" placeholder="Say something to all players…" maxlength="900">
+      <button type="submit" class="btn primary" id="chat-send">Send</button>
+    </form>
+  </section>
+  <section class="card">
     <h2>Map <button id="refresh-map" class="btn" type="button" style="float:right;font-size:11px;padding:4px 9px;">Refresh</button></h2>
     <div id="map-wrap">
       <img id="map-img" alt="" hidden>

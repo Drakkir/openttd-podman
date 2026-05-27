@@ -102,6 +102,28 @@ function renderState(state) {
     ));
   }
   $('#no-companies').classList.toggle('hidden', companies.length > 0);
+
+  // Chat
+  const chat = state.chat || [];
+  $('#chat-count').textContent = String(chat.length);
+  const log = $('#chat-log');
+  // Render only new messages — keep scroll position unless user is at bottom.
+  if (log.childElementCount !== chat.length) {
+    const wasAtBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 32;
+    log.innerHTML = '';
+    for (const m of chat) {
+      const client = state.clients && state.clients[m.clientId];
+      const who = client ? client.name : ('client #' + m.clientId);
+      const t = new Date(m.ts);
+      const stamp = t.toTimeString().slice(0, 8);
+      log.appendChild(el('div', { class: 'chat-line' },
+        el('span', { class: 'chat-ts' }, stamp),
+        el('span', { class: 'chat-who' }, who + ':'),
+        el('span', { class: 'chat-msg' }, m.message),
+      ));
+    }
+    if (wasAtBottom) log.scrollTop = log.scrollHeight;
+  }
 }
 
 function connect() {
@@ -142,5 +164,28 @@ async function refreshMap() {
 }
 
 $('#refresh-map').addEventListener('click', refreshMap);
+
+$('#chat-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const input = $('#chat-input');
+  const msg = input.value.trim();
+  if (!msg) return;
+  $('#chat-send').disabled = true;
+  try {
+    const r = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: msg }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
+    input.value = '';
+  } catch (err) {
+    alert('Send failed: ' + err.message);
+  } finally {
+    $('#chat-send').disabled = false;
+    input.focus();
+  }
+});
 
 connect();

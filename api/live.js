@@ -31,11 +31,13 @@ const PKT_SERVER_COMPANY_INFO = 114;
 const PKT_SERVER_COMPANY_UPDATE = 115;
 const PKT_SERVER_COMPANY_REMOVE = 116;
 const PKT_SERVER_COMPANY_ECONOMY = 117;
+const PKT_SERVER_CHAT = 119;
 
 const UPDATE_DATE = 0;
 const UPDATE_CLIENT_INFO = 1;
 const UPDATE_COMPANY_INFO = 2;
 const UPDATE_COMPANY_ECONOMY = 3;
+const UPDATE_CHAT = 5;
 
 const FREQ_POLL = 0x01;
 const FREQ_WEEKLY = 0x04;
@@ -113,7 +115,9 @@ class LiveAdmin {
       date: null,
       clients: {},    // id → {name, hostname, language, joinDate, company}
       companies: {},  // id → {name, manager, colour, isAI, inauguratedYear, ...}
+      chat: [],       // ring of recent chat messages
     };
+    this.chatMax = 100;
     this.sock = null;
     this.buffered = Buffer.alloc(0);
     this.backoffMs = 1000;
@@ -181,6 +185,7 @@ class LiveAdmin {
         this.sock.write(updateFreqPacket(UPDATE_CLIENT_INFO, FREQ_AUTOMATIC));
         this.sock.write(updateFreqPacket(UPDATE_COMPANY_INFO, FREQ_AUTOMATIC));
         this.sock.write(updateFreqPacket(UPDATE_COMPANY_ECONOMY, FREQ_MONTHLY | FREQ_WEEKLY));
+        this.sock.write(updateFreqPacket(UPDATE_CHAT, FREQ_AUTOMATIC));
         this.sock.write(pollPacket(UPDATE_CLIENT_INFO));
         this.sock.write(pollPacket(UPDATE_COMPANY_INFO));
         this.sock.write(pollPacket(UPDATE_COMPANY_ECONOMY));
@@ -251,6 +256,22 @@ class LiveAdmin {
       case PKT_SERVER_COMPANY_REMOVE: {
         const id = r.u8();
         delete this.state.companies[id];
+        this.emitState();
+        break;
+      }
+      case PKT_SERVER_CHAT: {
+        const action = r.u8();
+        const destType = r.u8();
+        const clientId = r.u32();
+        const message = r.str();
+        // Skip ADMIN_PACKET_ADMIN_CHAT etc., we want NETWORK_ACTION_CHAT and similar
+        this.state.chat.push({
+          ts: Date.now(),
+          action, destType, clientId, message,
+        });
+        if (this.state.chat.length > this.chatMax) {
+          this.state.chat.splice(0, this.state.chat.length - this.chatMax);
+        }
         this.emitState();
         break;
       }

@@ -113,6 +113,28 @@ const server = http.createServer(async (req, res) => {
     if (req.url === '/api/health') {
       return send(res, 200, JSON.stringify({ ok: true, data_dir: DATA_DIR }), 'application/json');
     }
+    if (req.url === '/api/chat' && req.method === 'POST') {
+      const adminPw = readAdminPassword();
+      if (!adminPw) {
+        return send(res, 500, JSON.stringify({
+          ok: false, error: 'admin_password not set in secrets.cfg',
+        }), 'application/json');
+      }
+      const body = JSON.parse(await readBody(req));
+      const message = (body.message || '').toString().trim();
+      if (!message) return send(res, 400, JSON.stringify({ ok: false, error: 'empty message' }), 'application/json');
+      const safeMsg = message.replace(/"/g, '\\"');
+      try {
+        await rconCommands({
+          host: OPENTTD_HOST,
+          port: OPENTTD_ADMIN_PORT,
+          password: adminPw,
+        }, [`say "${safeMsg}"`], { expectClose: false, timeoutMs: 5000 });
+      } catch (err) {
+        return send(res, 502, JSON.stringify({ ok: false, error: 'rcon error: ' + err.message }), 'application/json');
+      }
+      return send(res, 200, JSON.stringify({ ok: true }), 'application/json');
+    }
     if (req.url === '/api/map-screenshot' && req.method === 'POST') {
       const adminPw = readAdminPassword();
       if (!adminPw) {
