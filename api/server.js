@@ -527,7 +527,7 @@ const live = new LiveAdmin({
   },
 });
 wss.on('connection', ws => {
-  if (latestState) ws.send(JSON.stringify({ type: 'state', state: latestState }));
+  if (latestState) ws.send(JSON.stringify({ type: 'state', state: { ...latestState, mapTs } }));
 });
 server.on('upgrade', (req, socket, head) => {
   if (req.url === '/api/live-ws') {
