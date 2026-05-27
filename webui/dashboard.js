@@ -172,7 +172,7 @@ $('#spawn-ai').addEventListener('click', async () => {
   try {
     const r = await fetch('/api/spawn-ai', { method: 'POST' });
     const data = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(data.error || 'HTTP ' + r.status);
+    if (!data.ok) throw new Error((data.error || 'HTTP ' + r.status) + (data.hint ? '\n\n' + data.hint : ''));
   } catch (e) {
     alert('Spawn AI failed: ' + e.message);
   } finally {

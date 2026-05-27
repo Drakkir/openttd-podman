@@ -122,11 +122,21 @@ const server = http.createServer(async (req, res) => {
       }
       const opts = { host: OPENTTD_HOST, port: OPENTTD_ADMIN_PORT, password: adminPw };
       try {
+        // Check that at least one AI script is installed; without one the
+        // dummy AI loads and dies immediately, producing a silent no-op.
+        const listOut = await rconQuery(opts, ['list_ai'], { timeoutMs: 5000 });
+        const aiLines = (listOut[0] || []).filter(l => l && !/^List of AIs/.test(l));
+        if (aiLines.length === 0) {
+          return send(res, 200, JSON.stringify({
+            ok: false,
+            error: 'no AI scripts installed',
+            hint: 'Use OpenTTD’s in-game Online Content to download an AI (e.g. AdmiralAI), or drop a .tar into data/.local/share/openttd/ai/ and restart.',
+          }), 'application/json');
+        }
         let out = await rconQuery(opts, ['start_ai'], { timeoutMs: 5000 });
         const lines = out[0] || [];
         const blocked = lines.some(l => /not allowed in multiplayer/i.test(l));
         if (blocked) {
-          // Auto-enable the setting and retry once.
           await rconCommands(opts, ['setting ai.ai_in_multiplayer 1'], { expectClose: false, timeoutMs: 5000 });
           out = await rconQuery(opts, ['start_ai'], { timeoutMs: 5000 });
         }
