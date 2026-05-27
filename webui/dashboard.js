@@ -165,12 +165,39 @@ async function refreshMap() {
 
 $('#refresh-map').addEventListener('click', refreshMap);
 
+async function refreshAiList() {
+  const sel = $('#ai-pick');
+  try {
+    const r = await fetch('/api/list-ai');
+    const data = await r.json();
+    sel.innerHTML = '';
+    if (!data.ais || data.ais.length === 0) {
+      // No AIs installed → hide spawn/dropdown, show install
+      sel.hidden = true;
+      $('#spawn-ai').hidden = true;
+      $('#install-ai').hidden = false;
+    } else {
+      sel.hidden = false;
+      $('#spawn-ai').hidden = false;
+      $('#install-ai').hidden = true;
+      sel.appendChild(el('option', { value: '' }, 'Random'));
+      for (const ai of data.ais) sel.appendChild(el('option', { value: ai }, ai));
+    }
+  } catch {}
+}
+refreshAiList();
+
 $('#spawn-ai').addEventListener('click', async () => {
   const btn = $('#spawn-ai');
+  const sel = $('#ai-pick');
   btn.disabled = true;
   btn.textContent = '…';
   try {
-    const r = await fetch('/api/spawn-ai', { method: 'POST' });
+    const r = await fetch('/api/spawn-ai', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: sel.value || '' }),
+    });
     const data = await r.json().catch(() => ({}));
     if (!data.ok) throw new Error((data.error || 'HTTP ' + r.status) + (data.hint ? '\n\n' + data.hint : ''));
   } catch (e) {
@@ -178,6 +205,28 @@ $('#spawn-ai').addEventListener('click', async () => {
   } finally {
     btn.disabled = false;
     btn.textContent = 'Spawn AI';
+  }
+});
+
+$('#install-ai').addEventListener('click', async () => {
+  const btn = $('#install-ai');
+  btn.disabled = true;
+  btn.textContent = 'Installing…';
+  try {
+    const r = await fetch('/api/install-ai', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ search: 'AdmiralAI' }),
+    });
+    const data = await r.json();
+    if (!data.ok) throw new Error(data.error || 'HTTP ' + r.status);
+    alert('Installed: ' + data.installed + '. May need a server restart to register.');
+    setTimeout(refreshAiList, 2000);
+  } catch (e) {
+    alert('Install failed: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Install default AI';
   }
 });
 

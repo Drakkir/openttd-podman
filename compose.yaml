@@ -24,6 +24,9 @@ services:
     volumes:
       - ./data:/data
     user: "1000:1000"
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
 
   api:
     build: ./api

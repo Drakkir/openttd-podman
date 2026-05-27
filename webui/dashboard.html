@@ -53,7 +53,11 @@
   </section>
   <section class="card">
     <h2>Companies <span id="company-count" class="count">0</span>
-      <button id="spawn-ai" class="btn" type="button" style="float:right;font-size:11px;padding:4px 9px;">Spawn AI</button>
+      <span class="h2-actions">
+        <select id="ai-pick" class="btn" style="font-size:11px;padding:3px 6px;"></select>
+        <button id="spawn-ai" class="btn" type="button">Spawn AI</button>
+        <button id="install-ai" class="btn" type="button" hidden>Install default AI</button>
+      </span>
     </h2>
     <table id="companies">
       <thead>

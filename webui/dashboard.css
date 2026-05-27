@@ -79,6 +79,15 @@
   vertical-align: middle;
 }
 
+.h2-actions {
+  float: right;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.h2-actions .btn { font-size: 11px; padding: 4px 9px; }
+.h2-actions select.btn { padding: 3px 6px; }
+
 #chat-log {
   background: #fafaf9;
   border: 1px solid #e7e5e4;

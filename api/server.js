@@ -113,6 +113,52 @@ const server = http.createServer(async (req, res) => {
     if (req.url === '/api/health') {
       return send(res, 200, JSON.stringify({ ok: true, data_dir: DATA_DIR }), 'application/json');
     }
+    if (req.url === '/api/list-ai' && req.method === 'GET') {
+      const adminPw = readAdminPassword();
+      if (!adminPw) return send(res, 500, JSON.stringify({ ok: false, error: 'admin_password not set' }), 'application/json');
+      const opts = { host: OPENTTD_HOST, port: OPENTTD_ADMIN_PORT, password: adminPw };
+      try {
+        const out = await rconQuery(opts, ['list_ai'], { timeoutMs: 5000 });
+        // Parse lines like " 1: AdmiralAI  v34  [Built by Yexo]"
+        const ais = [];
+        for (const line of out[0] || []) {
+          const m = line.match(/^\s*\d+:\s*(\S+(?:\s+\S+)*?)\s*(?:\s+v\d|\s+\[|$)/);
+          if (m && m[1]) ais.push(m[1].trim());
+        }
+        return send(res, 200, JSON.stringify({ ok: true, ais }), 'application/json');
+      } catch (err) {
+        return send(res, 502, JSON.stringify({ ok: false, error: err.message }), 'application/json');
+      }
+    }
+    if (req.url === '/api/install-ai' && req.method === 'POST') {
+      const adminPw = readAdminPassword();
+      if (!adminPw) return send(res, 500, JSON.stringify({ ok: false, error: 'admin_password not set' }), 'application/json');
+      const opts = { host: OPENTTD_HOST, port: OPENTTD_ADMIN_PORT, password: adminPw };
+      const body = JSON.parse(await readBody(req) || '{}');
+      const search = (body.search || 'AdmiralAI').toLowerCase();
+      try {
+        // Refresh content list then scan for the AI by name
+        await rconCommands(opts, ['content update'], { expectClose: false, timeoutMs: 15_000 });
+        const state = await rconQuery(opts, ['content state'], { timeoutMs: 15_000 });
+        // Lines look like: "id, type, state, name" then "  42, ai, Unselected, AdmiralAI"
+        let foundId = null, foundName = null;
+        for (const line of state[0] || []) {
+          const parts = line.split(',').map(s => s.trim());
+          if (parts.length >= 4 && parts[1] === 'ai' && parts[3].toLowerCase().includes(search)) {
+            foundId = parts[0];
+            foundName = parts[3];
+            break;
+          }
+        }
+        if (!foundId) {
+          return send(res, 404, JSON.stringify({ ok: false, error: 'no matching AI found on content server' }), 'application/json');
+        }
+        await rconCommands(opts, [`content select ${foundId}`, 'content download'], { expectClose: false, timeoutMs: 60_000 });
+        return send(res, 200, JSON.stringify({ ok: true, installed: foundName, id: foundId }), 'application/json');
+      } catch (err) {
+        return send(res, 502, JSON.stringify({ ok: false, error: err.message }), 'application/json');
+      }
+    }
     if (req.url === '/api/spawn-ai' && req.method === 'POST') {
       const adminPw = readAdminPassword();
       if (!adminPw) {
@@ -121,24 +167,26 @@ const server = http.createServer(async (req, res) => {
         }), 'application/json');
       }
       const opts = { host: OPENTTD_HOST, port: OPENTTD_ADMIN_PORT, password: adminPw };
+      const body = JSON.parse(await readBody(req) || '{}');
+      const aiName = (body.name || '').toString().trim();
       try {
-        // Check that at least one AI script is installed; without one the
-        // dummy AI loads and dies immediately, producing a silent no-op.
+        // Check that at least one AI script is installed.
         const listOut = await rconQuery(opts, ['list_ai'], { timeoutMs: 5000 });
         const aiLines = (listOut[0] || []).filter(l => l && !/^List of AIs/.test(l));
         if (aiLines.length === 0) {
           return send(res, 200, JSON.stringify({
             ok: false,
             error: 'no AI scripts installed',
-            hint: 'Use OpenTTD’s in-game Online Content to download an AI (e.g. AdmiralAI), or drop a .tar into data/.local/share/openttd/ai/ and restart.',
+            hint: 'Click "Install default AI" first.',
           }), 'application/json');
         }
-        let out = await rconQuery(opts, ['start_ai'], { timeoutMs: 5000 });
+        const cmd = aiName ? `start_ai ${aiName.replace(/"/g, '')}` : 'start_ai';
+        let out = await rconQuery(opts, [cmd], { timeoutMs: 5000 });
         const lines = out[0] || [];
         const blocked = lines.some(l => /not allowed in multiplayer/i.test(l));
         if (blocked) {
           await rconCommands(opts, ['setting ai.ai_in_multiplayer 1'], { expectClose: false, timeoutMs: 5000 });
-          out = await rconQuery(opts, ['start_ai'], { timeoutMs: 5000 });
+          out = await rconQuery(opts, [cmd], { timeoutMs: 5000 });
         }
         return send(res, 200, JSON.stringify({ ok: true, output: out[0] || [] }), 'application/json');
       } catch (err) {
