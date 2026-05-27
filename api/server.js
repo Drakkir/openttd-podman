@@ -73,6 +73,24 @@ async function readBody(req) {
   return Buffer.concat(chunks).toString('utf-8');
 }
 
+const MAX_BACKUPS = 10;
+
+async function rotateBackups(filePath) {
+  // Keep only the most recent MAX_BACKUPS .bak-* files for this path.
+  const dir = path.dirname(filePath);
+  const base = path.basename(filePath) + '.bak-';
+  let entries;
+  try { entries = await fs.promises.readdir(dir); }
+  catch { return; }
+  const baks = entries
+    .filter(name => name.startsWith(base))
+    .sort()         // ISO timestamps sort naturally
+    .reverse();     // newest first
+  for (const old of baks.slice(MAX_BACKUPS)) {
+    try { await fs.promises.unlink(path.join(dir, old)); } catch {}
+  }
+}
+
 async function atomicWrite(filePath, contents) {
   const dir = path.dirname(filePath);
   await fs.promises.mkdir(dir, { recursive: true });
@@ -87,6 +105,7 @@ async function atomicWrite(filePath, contents) {
   const tmp = filePath + '.tmp-' + process.pid + '-' + Date.now();
   await fs.promises.writeFile(tmp, contents, 'utf-8');
   await fs.promises.rename(tmp, filePath);
+  await rotateBackups(filePath);
 }
 
 const server = http.createServer(async (req, res) => {
@@ -351,13 +370,43 @@ const server = http.createServer(async (req, res) => {
 
 // Live state + WebSocket fan-out.
 let latestState = null;
+let prevConnected = false;
+let bootSavePending = false;
 const wss = new WebSocketServer({ noServer: true });
+
+async function bootSave() {
+  const pw = readAdminPassword();
+  if (!pw) return;
+  const ts = new Date().toISOString().replace(/[:.]/g, '-');
+  try {
+    await rconCommands({
+      host: OPENTTD_HOST,
+      port: OPENTTD_ADMIN_PORT,
+      password: pw,
+    }, ['save autosave/boot-' + ts], { expectClose: false, timeoutMs: 30_000 });
+    console.log(`[${new Date().toISOString()}] boot-save: autosave/boot-${ts}`);
+  } catch (e) {
+    console.log('[boot-save] failed:', e.message);
+  }
+}
+
 const live = new LiveAdmin({
   host: OPENTTD_HOST,
   port: OPENTTD_ADMIN_PORT,
   dataDir: DATA_DIR,
   onState: state => {
     latestState = state;
+    if (state.connected && !prevConnected && !bootSavePending) {
+      // openttd just (re)booted — wait briefly for it to fully load, then
+      // capture a fresh autosave so a subsequent quit always has a recent
+      // resume point.
+      bootSavePending = true;
+      setTimeout(() => {
+        bootSavePending = false;
+        bootSave();
+      }, 5_000);
+    }
+    prevConnected = state.connected;
     const msg = JSON.stringify({ type: 'state', state });
     for (const client of wss.clients) {
       if (client.readyState === client.OPEN) client.send(msg);
