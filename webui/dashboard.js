@@ -165,6 +165,22 @@ async function refreshMap() {
 
 $('#refresh-map').addEventListener('click', refreshMap);
 
+$('#spawn-ai').addEventListener('click', async () => {
+  const btn = $('#spawn-ai');
+  btn.disabled = true;
+  btn.textContent = '…';
+  try {
+    const r = await fetch('/api/spawn-ai', { method: 'POST' });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || 'HTTP ' + r.status);
+  } catch (e) {
+    alert('Spawn AI failed: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Spawn AI';
+  }
+});
+
 $('#chat-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const input = $('#chat-input');

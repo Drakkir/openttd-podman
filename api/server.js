@@ -113,6 +113,28 @@ const server = http.createServer(async (req, res) => {
     if (req.url === '/api/health') {
       return send(res, 200, JSON.stringify({ ok: true, data_dir: DATA_DIR }), 'application/json');
     }
+    if (req.url === '/api/spawn-ai' && req.method === 'POST') {
+      const adminPw = readAdminPassword();
+      if (!adminPw) {
+        return send(res, 500, JSON.stringify({
+          ok: false, error: 'admin_password not set in secrets.cfg',
+        }), 'application/json');
+      }
+      const opts = { host: OPENTTD_HOST, port: OPENTTD_ADMIN_PORT, password: adminPw };
+      try {
+        let out = await rconQuery(opts, ['start_ai'], { timeoutMs: 5000 });
+        const lines = out[0] || [];
+        const blocked = lines.some(l => /not allowed in multiplayer/i.test(l));
+        if (blocked) {
+          // Auto-enable the setting and retry once.
+          await rconCommands(opts, ['setting ai.ai_in_multiplayer 1'], { expectClose: false, timeoutMs: 5000 });
+          out = await rconQuery(opts, ['start_ai'], { timeoutMs: 5000 });
+        }
+        return send(res, 200, JSON.stringify({ ok: true, output: out[0] || [] }), 'application/json');
+      } catch (err) {
+        return send(res, 502, JSON.stringify({ ok: false, error: err.message }), 'application/json');
+      }
+    }
     if (req.url === '/api/chat' && req.method === 'POST') {
       const adminPw = readAdminPassword();
       if (!adminPw) {
