@@ -216,27 +216,9 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, JSON.stringify({ ok: true }), 'application/json');
     }
     if (req.url === '/api/map-screenshot' && req.method === 'POST') {
-      const adminPw = readAdminPassword();
-      if (!adminPw) {
-        return send(res, 500, JSON.stringify({
-          ok: false,
-          error: 'admin_password not set in secrets.cfg',
-        }), 'application/json');
-      }
-      try {
-        await rconCommands({
-          host: OPENTTD_HOST,
-          port: OPENTTD_ADMIN_PORT,
-          password: adminPw,
-        }, ['screenshot minimap live-map'], { expectClose: false, timeoutMs: 30_000 });
-      } catch (err) {
-        return send(res, 502, JSON.stringify({
-          ok: false, error: 'rcon error: ' + err.message,
-        }), 'application/json');
-      }
-      // Wait a moment for openttd to flush the PNG.
-      await new Promise(r => setTimeout(r, 500));
-      return send(res, 200, JSON.stringify({ ok: true, ts: Date.now() }), 'application/json');
+      await takeMapScreenshot();
+      await new Promise(r => setTimeout(r, 300));
+      return send(res, 200, JSON.stringify({ ok: true, ts: mapTs }), 'application/json');
     }
     if (req.url.startsWith('/api/screenshot/') && req.method === 'GET') {
       const m = req.url.match(/^\/api\/screenshot\/([\w\-\.]+)(?:\?.*)?$/);
@@ -474,7 +456,30 @@ const server = http.createServer(async (req, res) => {
 let latestState = null;
 let prevConnected = false;
 let bootSavePending = false;
+let mapTs = 0;
 const wss = new WebSocketServer({ noServer: true });
+
+async function takeMapScreenshot() {
+  const pw = readAdminPassword();
+  if (!pw) return;
+  try {
+    await rconCommands({
+      host: OPENTTD_HOST,
+      port: OPENTTD_ADMIN_PORT,
+      password: pw,
+    }, ['screenshot minimap live-map'], { expectClose: false, timeoutMs: 30_000 });
+    mapTs = Date.now();
+    // Push fresh state so dashboards reload the image.
+    if (latestState) {
+      const msg = JSON.stringify({ type: 'state', state: { ...latestState, mapTs } });
+      for (const client of wss.clients) {
+        if (client.readyState === client.OPEN) client.send(msg);
+      }
+    }
+  } catch (e) {
+    console.log('[map-screenshot] failed:', e.message);
+  }
+}
 
 async function bootSave() {
   const pw = readAdminPassword();
@@ -506,13 +511,19 @@ const live = new LiveAdmin({
       setTimeout(() => {
         bootSavePending = false;
         bootSave();
+        // Also refresh the map preview on boot so dashboards have a baseline.
+        takeMapScreenshot();
       }, 5_000);
     }
     prevConnected = state.connected;
-    const msg = JSON.stringify({ type: 'state', state });
+    const msg = JSON.stringify({ type: 'state', state: { ...state, mapTs } });
     for (const client of wss.clients) {
       if (client.readyState === client.OPEN) client.send(msg);
     }
+  },
+  onYearChange: year => {
+    console.log(`[live] year rolled over to ${year} — taking map snapshot`);
+    takeMapScreenshot();
   },
 });
 wss.on('connection', ws => {

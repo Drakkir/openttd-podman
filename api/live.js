@@ -42,6 +42,7 @@ const UPDATE_CHAT = 5;
 const FREQ_POLL = 0x01;
 const FREQ_WEEKLY = 0x04;
 const FREQ_MONTHLY = 0x08;
+const FREQ_ANUALLY = 0x20;
 const FREQ_AUTOMATIC = 0x40;
 
 // Stream-based packet reader for null-terminated strings + integers.
@@ -103,11 +104,13 @@ function readAdminPassword(secretsPath) {
 }
 
 class LiveAdmin {
-  constructor({ host, port, dataDir, onState }) {
+  constructor({ host, port, dataDir, onState, onYearChange }) {
     this.host = host;
     this.port = port;
     this.secretsPath = path.join(dataDir, 'secrets.cfg');
     this.onState = onState;
+    this.onYearChange = onYearChange;
+    this.prevYear = null;
     this.state = {
       connected: false,
       serverName: null,
@@ -186,15 +189,27 @@ class LiveAdmin {
         this.sock.write(updateFreqPacket(UPDATE_COMPANY_INFO, FREQ_AUTOMATIC));
         this.sock.write(updateFreqPacket(UPDATE_COMPANY_ECONOMY, FREQ_MONTHLY | FREQ_WEEKLY));
         this.sock.write(updateFreqPacket(UPDATE_CHAT, FREQ_AUTOMATIC));
+        this.sock.write(updateFreqPacket(UPDATE_DATE, FREQ_ANUALLY | FREQ_POLL));
+        this.sock.write(pollPacket(UPDATE_DATE, 0));
         this.sock.write(pollPacket(UPDATE_CLIENT_INFO));
         this.sock.write(pollPacket(UPDATE_COMPANY_INFO));
         this.sock.write(pollPacket(UPDATE_COMPANY_ECONOMY));
         break;
       }
-      case PKT_SERVER_DATE:
-        this.state.date = r.u32();
+      case PKT_SERVER_DATE: {
+        const date = r.u32();
+        // OpenTTD calendar date is days since year 0. Approximate year — good
+        // enough for "did the year roll over" detection.
+        const year = Math.floor(date / 365.25);
+        this.state.date = date;
+        this.state.year = year;
+        if (this.prevYear !== null && year !== this.prevYear && this.onYearChange) {
+          this.onYearChange(year);
+        }
+        this.prevYear = year;
         this.emitState();
         break;
+      }
       case PKT_SERVER_CLIENT_INFO: {
         const id = r.u32();
         const hostname = r.str();

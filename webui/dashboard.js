@@ -48,7 +48,17 @@ function fmtMoney(v) {
   return String(v);
 }
 
+let lastMapTs = 0;
 function renderState(state) {
+  if (state.mapTs && state.mapTs !== lastMapTs) {
+    lastMapTs = state.mapTs;
+    const img = $('#map-img');
+    if (img) {
+      img.src = '/api/screenshot/live-map.png?t=' + state.mapTs;
+      img.hidden = false;
+      $('#map-empty').classList.add('hidden');
+    }
+  }
   const status = $('#conn-status');
   if (state.connected) {
     status.classList.add('online');
@@ -58,8 +68,9 @@ function renderState(state) {
     status.title = 'Admin port unreachable';
   }
 
+  const yearPart = state.year != null ? ` — year ${state.year}` : '';
   $('#server-info').textContent = state.serverName
-    ? `${state.serverName} (${state.serverVersion || 'unknown version'})`
+    ? `${state.serverName} (${state.serverVersion || 'unknown version'})${yearPart}`
     : 'No server info yet';
 
   const clients = Object.values(state.clients || {}).sort((a, b) => a.id - b.id);
