@@ -291,15 +291,21 @@ const server = http.createServer(async (req, res) => {
         }), 'application/json');
       }
       const body = JSON.parse(await readBody(req));
-      // Stage cfg files first so disk reflects what's in the editor — this
-      // matters because OpenTTD's in-memory state and our .cfg files would
-      // otherwise drift after live changes, and a page refresh would read
-      // stale cfg back into the UI.
+      // Write directly to .cfg (not .staged) so the file reflects the editor
+      // state immediately. Safe because the live settings we're about to push
+      // via rcon will keep openttd's in-memory state matching this cfg, so a
+      // future clean shutdown writes back the same values rather than
+      // clobbering. Restart-only settings stay in the cfg until next start;
+      // if openttd shuts down before then they may revert — call apply-restart
+      // when you want those locked in.
       for (const target of ['openttd', 'private', 'secrets']) {
         if (typeof body[target] !== 'string') continue;
-        const staged = path.join(DATA_DIR, target + '.cfg.staged');
-        await fs.promises.writeFile(staged + '.tmp', body[target], 'utf-8');
-        await fs.promises.rename(staged + '.tmp', staged);
+        const file = path.join(DATA_DIR, target + '.cfg');
+        await atomicWrite(file, body[target]);
+      }
+      // Clear any leftover staged files from earlier apply-restart attempts.
+      for (const target of ['openttd', 'private', 'secrets']) {
+        await fs.promises.unlink(path.join(DATA_DIR, target + '.cfg.staged')).catch(() => {});
       }
       const settings = Array.isArray(body.settings) ? body.settings : [];
       if (settings.length === 0) {
