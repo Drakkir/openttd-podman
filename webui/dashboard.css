@@ -2,8 +2,13 @@
   padding: 24px;
   display: grid;
   gap: 20px;
-  max-width: 1100px;
+  grid-template-columns: repeat(auto-fit, minmax(460px, 1fr));
+  max-width: 1800px;
+  margin: 0 auto;
+  align-items: start;
 }
+/* Cards that benefit from full width when present (wide tables / charts). */
+.card.wide { grid-column: 1 / -1; }
 .card {
   background: #fff;
   border: 1px solid #e7e5e4;
