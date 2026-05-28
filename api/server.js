@@ -123,11 +123,13 @@ const server = http.createServer(async (req, res) => {
       const opts = { host: OPENTTD_HOST, port: OPENTTD_ADMIN_PORT, password: adminPw };
       try {
         const out = await rconQuery(opts, ['list_ai'], { timeoutMs: 5000 });
-        // Parse lines like " 1: AdmiralAI  v34  [Built by Yexo]"
+        // Parse lines like " AdmiralAI (v25): An AI that uses..." or
+        // legacy " 1: AdmiralAI  v34". Capture the name token.
         const ais = [];
         for (const line of out[0] || []) {
-          const m = line.match(/^\s*\d+:\s*(\S+(?:\s+\S+)*?)\s*(?:\s+v\d|\s+\[|$)/);
-          if (m && m[1]) ais.push(m[1].trim());
+          if (/^List of AIs/i.test(line)) continue;
+          const m = line.match(/^\s*(?:\d+:\s*)?(\S+)/);
+          if (m && m[1]) ais.push(m[1]);
         }
         return send(res, 200, JSON.stringify({ ok: true, ais }), 'application/json');
       } catch (err) {
@@ -148,7 +150,7 @@ const server = http.createServer(async (req, res) => {
         let foundId = null, foundName = null;
         for (const line of state[0] || []) {
           const parts = line.split(',').map(s => s.trim());
-          if (parts.length >= 4 && parts[1] === 'ai' && parts[3].toLowerCase().includes(search)) {
+          if (parts.length >= 4 && parts[1].toLowerCase() === 'ai' && parts[3].toLowerCase().includes(search)) {
             foundId = parts[0];
             foundName = parts[3];
             break;

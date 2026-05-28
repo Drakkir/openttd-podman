@@ -25,8 +25,10 @@ services:
       - ./data:/data
     user: "1000:1000"
     dns:
-      - 1.1.1.1
-      - 8.8.8.8
+      - 9.9.9.9
+    # Pin the IPv4 since container has no IPv6 routing in rootless podman.
+    extra_hosts:
+      - "content.openttd.org:84.235.161.209"
 
   api:
     build: ./api
