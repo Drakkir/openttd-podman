@@ -44,6 +44,13 @@
       <button type="submit" class="btn primary" id="chat-send">Send</button>
     </form>
   </section>
+  <section class="card">
+    <h2>Map <button id="refresh-map" class="btn" type="button" style="float:right;font-size:11px;padding:4px 9px;">Refresh</button></h2>
+    <div id="map-wrap">
+      <img id="map-img" alt="" hidden>
+      <p id="map-empty" class="empty">Click <em>Refresh</em> to generate a minimap snapshot.</p>
+    </div>
+  </section>
   <section class="card wide">
     <h2>Economy
       <span class="h2-actions">
@@ -57,13 +64,6 @@
     </h2>
     <svg id="econ-chart" viewBox="0 0 800 240"></svg>
     <div id="econ-legend"></div>
-  </section>
-  <section class="card">
-    <h2>Map <button id="refresh-map" class="btn" type="button" style="float:right;font-size:11px;padding:4px 9px;">Refresh</button></h2>
-    <div id="map-wrap">
-      <img id="map-img" alt="" hidden>
-      <p id="map-empty" class="empty">Click <em>Refresh</em> to generate a minimap snapshot.</p>
-    </div>
   </section>
   <section class="card wide">
     <h2>Companies <span id="company-count" class="count">0</span>
