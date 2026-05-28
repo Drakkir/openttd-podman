@@ -163,12 +163,13 @@ def main():
             # runtime on a network server), 'live' = applies via rcon setting.
             # game_creation.* settings all describe map/world generation and
             # have no practical effect mid-game even when OpenTTD allows the
-            # rcon — bulk-treat them as newgame.
-            if 'NewgameOnly' in flags or 'SceneditOnly' in flags:
+            # rcon — bulk-treat them as newgame. Use word-boundary matching so
+            # NoNetworkSync doesn't accidentally trigger the NoNetwork branch.
+            if re.search(r'\bSettingFlag::(NewgameOnly|SceneditOnly)\b', flags):
                 entry['change'] = 'newgame'
             elif section == 'game_creation' and key != 'ending_year':
                 entry['change'] = 'newgame'
-            elif 'NoNetwork' in flags:
+            elif re.search(r'\bSettingFlag::NoNetwork\b', flags):
                 entry['change'] = 'restart'
             else:
                 entry['change'] = 'live'
