@@ -32,6 +32,7 @@ header h1 {
   user-select: none;
 }
 .api-status.online { color: #16a34a; }
+.api-status.warning { color: #f59e0b; }
 .btn {
   display: inline-block;
   padding: 6px 12px;

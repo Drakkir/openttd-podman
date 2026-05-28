@@ -111,7 +111,11 @@ async function atomicWrite(filePath, contents) {
 const server = http.createServer(async (req, res) => {
   try {
     if (req.url === '/api/health') {
-      return send(res, 200, JSON.stringify({ ok: true, data_dir: DATA_DIR }), 'application/json');
+      return send(res, 200, JSON.stringify({
+        ok: true,
+        data_dir: DATA_DIR,
+        openttd_connected: !!(latestState && latestState.connected),
+      }), 'application/json');
     }
     if (req.url === '/api/list-ai' && req.method === 'GET') {
       const adminPw = readAdminPassword();

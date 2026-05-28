@@ -87,6 +87,7 @@ const I18N = {
     reset_default: 'Reset to default',
     api_online: 'Connected to server',
     api_offline: 'Server API unreachable',
+    api_no_openttd: 'API reachable but OpenTTD admin port is down',
     loaded_from_server: 'Loaded from server',
     saved_restart: 'Staged. Changes apply at next server restart.',
     load_failed: 'Load failed: ',
@@ -160,6 +161,7 @@ const I18N = {
     reset_default: 'Återställ till default',
     api_online: 'Ansluten till server',
     api_offline: 'Server-API ej tillgängligt',
+    api_no_openttd: 'API nås men OpenTTDs admin-port är nere',
     loaded_from_server: 'Laddat från servern',
     saved_restart: 'Stagat. Ändringarna tar effekt vid nästa server-omstart.',
     load_failed: 'Kunde inte ladda: ',
@@ -1037,30 +1039,35 @@ function serializeCfg(targetFile) {
 let initialLoadDone = false;
 async function pingApi() {
   const ind = $('#api-status');
+  let ok = false;
+  let openttdOk = false;
   try {
     const r = await fetch('/api/health', { cache: 'no-store' });
-    if (!r.ok) throw new Error('not ok');
-    ind.classList.add('online');
-    ind.title = T('api_online');
-    $('#server-save').disabled = false;
-    $('#apply-restart').disabled = false;
-    $('#fresh-start').disabled = false;
-    $('#apply-live').disabled = false;
-    $('#refresh-live').disabled = false;
-    if (!initialLoadDone) {
-      initialLoadDone = true;
-      // Prefer live in-memory state; fall back to cfg files if admin port
-      // isn't reachable (e.g. admin_password missing).
-      refreshLive({ silent: true }).catch(() => loadFromServer());
+    if (r.ok) {
+      const data = await r.json().catch(() => ({}));
+      ok = true;
+      openttdOk = !!data.openttd_connected;
     }
-  } catch {
-    ind.classList.remove('online');
-    ind.title = T('api_offline');
-    $('#server-save').disabled = true;
-    $('#apply-restart').disabled = true;
-    $('#fresh-start').disabled = true;
-    $('#apply-live').disabled = true;
-    $('#refresh-live').disabled = true;
+  } catch { /* api down */ }
+
+  ind.classList.toggle('online', ok && openttdOk);
+  ind.classList.toggle('warning', ok && !openttdOk);
+  if (ok && openttdOk) ind.title = T('api_online');
+  else if (ok) ind.title = T('api_no_openttd');
+  else ind.title = T('api_offline');
+
+  const liveOps = ok && openttdOk;
+  $('#apply-live').disabled = !liveOps;
+  $('#refresh-live').disabled = !liveOps;
+  $('#apply-restart').disabled = !liveOps;
+  // Save (staged) and fresh-start work without openttd running, only need api
+  $('#server-save').disabled = !ok;
+  $('#fresh-start').disabled = !ok;
+
+  if (ok && !initialLoadDone) {
+    initialLoadDone = true;
+    if (openttdOk) refreshLive({ silent: true }).catch(() => loadFromServer());
+    else loadFromServer();
   }
 }
 
@@ -1331,6 +1338,8 @@ function init() {
   $('#server-save').addEventListener('click', saveToServer);
   $('#apply-live').addEventListener('click', applyLive);
   $('#refresh-live').addEventListener('click', () => { refreshLive().catch(() => {}); });
+  // Poll health every 10s so the status dot tracks openttd reachability
+  setInterval(pingApi, 10_000);
   $('#status-close').addEventListener('click', dismissFlash);
   $('#apply-restart').addEventListener('click', applyAndRestart);
   $('#fresh-start').addEventListener('click', freshStart);
