@@ -85,8 +85,11 @@
 }
 
 #econ-chart {
+  display: block;
   width: 100%;
-  height: 240px;
+  height: auto;
+  aspect-ratio: 800 / 240;
+  max-height: 320px;
   background: #fafaf9;
   border: 1px solid #e7e5e4;
   border-radius: 4px;
