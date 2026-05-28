@@ -17,7 +17,10 @@ services:
     build: .
     image: localhost/openttd-server:latest
     container_name: openttd
-    restart: unless-stopped
+    # restart: no — the server is started/stopped on demand from the
+    # dashboard so the API container can drive its lifecycle. The webui
+    # and api stay up regardless.
+    restart: "no"
     ports:
       - "3979:3979/tcp"
       - "3979:3979/udp"

@@ -47,6 +47,30 @@ function startContainer(name) {
   });
 }
 
+function inspectContainer(name) {
+  return new Promise((resolve, reject) => {
+    if (!CONTAINER_SOCKET) return reject(new Error('no container socket'));
+    const req = http.request({
+      socketPath: CONTAINER_SOCKET,
+      method: 'GET',
+      path: `/containers/${encodeURIComponent(name)}/json`,
+      headers: { Host: 'container-engine' },
+    }, res => {
+      let body = '';
+      res.on('data', c => body += c);
+      res.on('end', () => {
+        if (res.statusCode === 200) {
+          try { resolve(JSON.parse(body)); } catch (e) { reject(e); }
+        } else {
+          reject(new Error(`inspect ${name}: HTTP ${res.statusCode} ${body.slice(0, 200)}`));
+        }
+      });
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
 function readAdminPassword() {
   try {
     const text = fs.readFileSync(path.join(DATA_DIR, 'secrets.cfg'), 'utf-8');
@@ -116,6 +140,111 @@ const server = http.createServer(async (req, res) => {
         data_dir: DATA_DIR,
         openttd_connected: !!(latestState && latestState.connected),
       }), 'application/json');
+    }
+    if (req.url === '/api/server/status' && req.method === 'GET') {
+      const connected = !!(latestState && latestState.connected);
+      if (!CONTAINER_SOCKET) {
+        return send(res, 200, JSON.stringify({
+          ok: true, socket: false, connected,
+          running: connected, status: connected ? 'running' : 'unknown',
+        }), 'application/json');
+      }
+      try {
+        const info = await inspectContainer(CONTAINER_NAME);
+        const s = info.State || {};
+        return send(res, 200, JSON.stringify({
+          ok: true, socket: true, connected,
+          running: s.Running === true,
+          status: s.Status || 'unknown',
+          startedAt: s.StartedAt || null,
+          finishedAt: s.FinishedAt || null,
+        }), 'application/json');
+      } catch (err) {
+        return send(res, 500, JSON.stringify({ ok: false, error: err.message }), 'application/json');
+      }
+    }
+    if (req.url === '/api/server/start' && req.method === 'POST') {
+      if (!CONTAINER_SOCKET) {
+        return send(res, 503, JSON.stringify({
+          ok: false, error: 'container socket not mounted',
+        }), 'application/json');
+      }
+      try {
+        const r = await startContainer(CONTAINER_NAME);
+        return send(res, 200, JSON.stringify({ ok: true, started: !r.already, already: r.already }), 'application/json');
+      } catch (err) {
+        return send(res, 502, JSON.stringify({ ok: false, error: err.message }), 'application/json');
+      }
+    }
+    if (req.url === '/api/server/stop' && req.method === 'POST') {
+      const adminPw = readAdminPassword();
+      if (!adminPw) {
+        return send(res, 500, JSON.stringify({ ok: false, error: 'admin_password not set' }), 'application/json');
+      }
+      try {
+        await rconQuit({ host: OPENTTD_HOST, port: OPENTTD_ADMIN_PORT, password: adminPw });
+        return send(res, 200, JSON.stringify({ ok: true, quit: true }), 'application/json');
+      } catch (err) {
+        return send(res, 502, JSON.stringify({ ok: false, error: err.message }), 'application/json');
+      }
+    }
+    if (req.url === '/api/logs/openttd' && req.method === 'GET') {
+      const logPath = path.join(DATA_ROOT, 'openttd.log');
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'X-Accel-Buffering': 'no',
+      });
+      let pos = 0;
+      // Seed with the last ~100 lines (read at most the tail of the file).
+      try {
+        const st = await fs.promises.stat(logPath);
+        const tailBytes = Math.min(st.size, 64 * 1024);
+        const start = st.size - tailBytes;
+        const fd = await fs.promises.open(logPath, 'r');
+        const buf = Buffer.alloc(tailBytes);
+        await fd.read(buf, 0, tailBytes, start);
+        await fd.close();
+        const text = buf.toString('utf-8');
+        const lines = text.split('\n');
+        // Drop a leading partial line if we didn't start at byte 0.
+        if (start > 0) lines.shift();
+        const recent = lines.filter(l => l.length > 0).slice(-100);
+        for (const line of recent) res.write(`data: ${JSON.stringify(line)}\n\n`);
+        pos = st.size;
+      } catch (err) {
+        if (err.code !== 'ENOENT') {
+          res.write(`event: error\ndata: ${JSON.stringify(err.message)}\n\n`);
+        }
+      }
+      let leftover = '';
+      const poll = setInterval(async () => {
+        try {
+          const st = await fs.promises.stat(logPath);
+          if (st.size < pos) { pos = 0; leftover = ''; } // truncated on container restart
+          if (st.size > pos) {
+            const len = st.size - pos;
+            const fd = await fs.promises.open(logPath, 'r');
+            const buf = Buffer.alloc(len);
+            await fd.read(buf, 0, len, pos);
+            await fd.close();
+            pos = st.size;
+            const text = leftover + buf.toString('utf-8');
+            const parts = text.split('\n');
+            leftover = parts.pop(); // keep last partial line for next tick
+            for (const line of parts) {
+              if (line.length > 0) res.write(`data: ${JSON.stringify(line)}\n\n`);
+            }
+          }
+        } catch (err) {
+          if (err.code !== 'ENOENT') {
+            res.write(`event: error\ndata: ${JSON.stringify(err.message)}\n\n`);
+          }
+        }
+      }, 1000);
+      req.on('close', () => clearInterval(poll));
+      return;
     }
     if (req.url === '/api/list-ai' && req.method === 'GET') {
       const adminPw = readAdminPassword();
@@ -423,7 +552,24 @@ const server = http.createServer(async (req, res) => {
           port: OPENTTD_ADMIN_PORT,
           password: adminPw,
         });
-        return send(res, 200, JSON.stringify({ ok: true, sentinel, quit: true }), 'application/json');
+        // With restart: no on the openttd service, the container exits after
+        // rconQuit and stays down. Explicitly start it back up so fresh-start
+        // ends with a running server.
+        let restarted = false;
+        if (CONTAINER_SOCKET) {
+          // Give the container a moment to actually exit before starting.
+          await new Promise(r => setTimeout(r, 1500));
+          try {
+            const r = await startContainer(CONTAINER_NAME);
+            restarted = !r.already;
+          } catch (e) {
+            return send(res, 200, JSON.stringify({
+              ok: true, sentinel, quit: true, restarted: false,
+              note: 'quit succeeded but auto-restart failed: ' + e.message,
+            }), 'application/json');
+          }
+        }
+        return send(res, 200, JSON.stringify({ ok: true, sentinel, quit: true, restarted }), 'application/json');
       } catch (err) {
         // Admin unreachable. If a container socket is mounted, try to start
         // the container directly — restart policy + sentinel will do the rest.

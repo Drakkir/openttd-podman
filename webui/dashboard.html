@@ -17,7 +17,13 @@
 </header>
 <main class="dash">
   <section class="card">
-    <h2>Server</h2>
+    <h2>Server
+      <span class="h2-actions">
+        <span id="srv-state" class="srv-state">…</span>
+        <button id="srv-start" class="btn" type="button" hidden>Start</button>
+        <button id="srv-stop" class="btn" type="button" hidden>Stop</button>
+      </span>
+    </h2>
     <div id="server-info">—</div>
   </section>
   <section class="card">
@@ -92,6 +98,15 @@
       <tbody></tbody>
     </table>
     <p id="no-companies" class="empty">No companies yet.</p>
+  </section>
+  <section class="card wide">
+    <h2>Server log
+      <span class="h2-actions">
+        <label class="srv-log-toggle"><input type="checkbox" id="log-follow" checked> Follow</label>
+        <button id="log-clear" class="btn" type="button">Clear</button>
+      </span>
+    </h2>
+    <pre id="server-log" class="server-log"></pre>
   </section>
 </main>
 <script src="dashboard.js"></script>

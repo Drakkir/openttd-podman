@@ -220,14 +220,16 @@ function renderEconomyChart(state) {
       stroke: '#d6d3d1', 'stroke-dasharray': '3,3',
     }));
   }
-  // X-axis labels: OpenTTD calendar date (days → "YYYY MMM"). Few labels if
-  // the span is short so they don't repeat.
-  const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  // X-axis labels: OpenTTD calendar date (days) → "YYYY-MM-DD" so weekly
+  // economy ticks within the same month don't render as identical labels.
   const fmtGameDate = d => {
     const year = Math.floor(d / 365.25);
-    const dayOfYear = d - Math.floor(year * 365.25);
-    const month = Math.min(11, Math.max(0, Math.floor(dayOfYear / 30.4)));
-    return `${year} ${MONTHS[month]}`;
+    const dayOfYear = Math.max(0, Math.floor(d - year * 365.25));
+    const month = Math.min(11, Math.floor(dayOfYear / 30.4));
+    const dayOfMonth = Math.max(1, dayOfYear - Math.floor(month * 30.4) + 1);
+    const mm = String(month + 1).padStart(2, '0');
+    const dd = String(dayOfMonth).padStart(2, '0');
+    return `${year}-${mm}-${dd}`;
   };
   for (let i = 0; i <= 4; i++) {
     const t = tMin + (tMax - tMin) * i / 4;
@@ -377,5 +379,93 @@ $('#chat-form').addEventListener('submit', async (e) => {
     input.focus();
   }
 });
+
+async function refreshServerStatus() {
+  try {
+    const r = await fetch('/api/server/status');
+    const d = await r.json();
+    const badge = $('#srv-state');
+    const start = $('#srv-start');
+    const stop = $('#srv-stop');
+    badge.classList.remove('running', 'stopped');
+    if (d.running) {
+      badge.textContent = 'running';
+      badge.classList.add('running');
+      start.hidden = true;
+      stop.hidden = !d.socket && !d.connected; // need rcon to quit
+    } else {
+      badge.textContent = d.status || 'stopped';
+      badge.classList.add('stopped');
+      start.hidden = !d.socket;       // need socket to start
+      stop.hidden = true;
+    }
+    if (!d.socket) {
+      start.title = 'Container socket not mounted; cannot start from here';
+      start.disabled = true;
+    } else {
+      start.title = 'Start the openttd container';
+      start.disabled = false;
+    }
+  } catch {
+    $('#srv-state').textContent = '?';
+  }
+}
+refreshServerStatus();
+setInterval(refreshServerStatus, 5000);
+
+$('#srv-start').addEventListener('click', async () => {
+  const btn = $('#srv-start');
+  btn.disabled = true;
+  try {
+    const r = await fetch('/api/server/start', { method: 'POST' });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+  } catch (e) {
+    alert('Start failed: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    refreshServerStatus();
+  }
+});
+$('#srv-stop').addEventListener('click', async () => {
+  if (!confirm('Stop the OpenTTD server? Players will be disconnected.')) return;
+  const btn = $('#srv-stop');
+  btn.disabled = true;
+  try {
+    const r = await fetch('/api/server/stop', { method: 'POST' });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+  } catch (e) {
+    alert('Stop failed: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    setTimeout(refreshServerStatus, 1500);
+  }
+});
+
+// Server log: SSE stream. Cap UI scrollback at 100 lines.
+const LOG_MAX = 100;
+let logSrc = null;
+function attachLog() {
+  const pre = $('#server-log');
+  const follow = $('#log-follow');
+  if (logSrc) logSrc.close();
+  logSrc = new EventSource('/api/logs/openttd');
+  logSrc.onmessage = ev => {
+    let text;
+    try { text = JSON.parse(ev.data); } catch { return; }
+    pre.appendChild(document.createTextNode(text + '\n'));
+    // Trim to last LOG_MAX lines
+    while (pre.childNodes.length > LOG_MAX) pre.removeChild(pre.firstChild);
+    if (follow.checked) pre.scrollTop = pre.scrollHeight;
+  };
+  logSrc.onerror = () => {
+    // EventSource auto-reconnects; nothing else to do.
+  };
+}
+$('#log-clear').addEventListener('click', () => {
+  $('#server-log').innerHTML = '';
+});
+attachLog();
 
 connect();
