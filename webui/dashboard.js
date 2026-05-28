@@ -199,9 +199,9 @@ function renderEconomyChart(state) {
   chart.innerHTML = '';
   if (tMin === Infinity) return;
   if (vMin === vMax) { vMin -= 1; vMax += 1; }
-  const W = 800, H = 240, PAD = 20;
-  const xScale = t => PAD + ((t - tMin) / Math.max(1, tMax - tMin)) * (W - 2 * PAD);
-  const yScale = v => H - PAD - ((v - vMin) / (vMax - vMin)) * (H - 2 * PAD);
+  const W = 800, H = 240, PAD_L = 38, PAD_R = 6, PAD_T = 8, PAD_B = 18;
+  const xScale = t => PAD_L + ((t - tMin) / Math.max(1, tMax - tMin)) * (W - PAD_L - PAD_R);
+  const yScale = v => H - PAD_B - ((v - vMin) / (vMax - vMin)) * (H - PAD_T - PAD_B);
 
   const ns = 'http://www.w3.org/2000/svg';
   function svg(name, attrs, text) {
@@ -213,7 +213,7 @@ function renderEconomyChart(state) {
   // Y zero-line
   if (vMin <= 0 && vMax >= 0) {
     chart.appendChild(svg('line', {
-      x1: PAD, x2: W - PAD, y1: yScale(0), y2: yScale(0),
+      x1: PAD_L, x2: W - PAD_R, y1: yScale(0), y2: yScale(0),
       stroke: '#d6d3d1', 'stroke-dasharray': '3,3',
     }));
   }
@@ -226,7 +226,7 @@ function renderEconomyChart(state) {
       'font-size': '10', fill: '#78716c',
     }, new Date(t).toLocaleString('sv-SE', { month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' })));
     chart.appendChild(svg('line', {
-      x1: x, x2: x, y1: PAD, y2: H - PAD,
+      x1: x, x2: x, y1: PAD_T, y2: H - PAD_B,
       stroke: '#f5f5f4',
     }));
   }
@@ -234,7 +234,7 @@ function renderEconomyChart(state) {
   const fmtVal = v => Math.abs(v) >= 1e6 ? (v/1e6).toFixed(1) + 'M' : Math.abs(v) >= 1e3 ? (v/1e3).toFixed(0) + 'k' : String(Math.round(v));
   for (const v of [vMin, (vMin + vMax) / 2, vMax]) {
     chart.appendChild(svg('text', {
-      x: PAD - 4, y: yScale(v) + 4, 'text-anchor': 'end',
+      x: PAD_L - 4, y: yScale(v) + 4, 'text-anchor': 'end',
       'font-size': '10', fill: '#78716c',
     }, fmtVal(v)));
   }
