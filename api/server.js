@@ -333,6 +333,23 @@ const server = http.createServer(async (req, res) => {
           error: 'admin port error: ' + err.message,
         }), 'application/json');
       }
+      // Settings like server_name come from WELCOME and won't change in the
+      // ws state on their own; patch them in so dashboards see the new value.
+      if (latestState) {
+        let stateChanged = false;
+        for (const s of settings) {
+          if (s.section === 'network' && s.key === 'server_name') {
+            latestState.serverName = s.value;
+            stateChanged = true;
+          }
+        }
+        if (stateChanged) {
+          const msg = JSON.stringify({ type: 'state', state: { ...latestState, mapTs } });
+          for (const client of wss.clients) {
+            if (client.readyState === client.OPEN) client.send(msg);
+          }
+        }
+      }
       console.log(`[${new Date().toISOString()}] apply-live: ${cmds.length} commands`);
       return send(res, 200, JSON.stringify({ ok: true, applied: cmds.length }), 'application/json');
     }
