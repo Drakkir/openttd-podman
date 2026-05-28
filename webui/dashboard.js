@@ -186,11 +186,14 @@ function renderEconomyChart(state) {
   const history = state.economyHistory || {};
   const ids = Object.keys(history).sort();
   // Find global time + value range
+  // X axis is OpenTTD calendar days (gameDate); fall back to wall-clock ts if absent.
+  const xOf = pt => (pt.gameDate != null ? pt.gameDate : pt.ts);
   let tMin = Infinity, tMax = -Infinity, vMin = Infinity, vMax = -Infinity;
   for (const id of ids) {
     for (const pt of history[id]) {
-      if (pt.ts < tMin) tMin = pt.ts;
-      if (pt.ts > tMax) tMax = pt.ts;
+      const x = xOf(pt);
+      if (x < tMin) tMin = x;
+      if (x > tMax) tMax = x;
       const v = pt[metric] ?? 0;
       if (v < vMin) vMin = v;
       if (v > vMax) vMax = v;
@@ -217,14 +220,22 @@ function renderEconomyChart(state) {
       stroke: '#d6d3d1', 'stroke-dasharray': '3,3',
     }));
   }
-  // X-axis date labels (4 evenly spaced)
+  // X-axis labels: OpenTTD calendar date (days → "YYYY MMM"). Few labels if
+  // the span is short so they don't repeat.
+  const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const fmtGameDate = d => {
+    const year = Math.floor(d / 365.25);
+    const dayOfYear = d - Math.floor(year * 365.25);
+    const month = Math.min(11, Math.max(0, Math.floor(dayOfYear / 30.4)));
+    return `${year} ${MONTHS[month]}`;
+  };
   for (let i = 0; i <= 4; i++) {
     const t = tMin + (tMax - tMin) * i / 4;
     const x = xScale(t);
     chart.appendChild(svg('text', {
       x, y: H - 4, 'text-anchor': i === 0 ? 'start' : (i === 4 ? 'end' : 'middle'),
       'font-size': '10', fill: '#78716c',
-    }, new Date(t).toLocaleString('sv-SE', { month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' })));
+    }, fmtGameDate(t)));
     chart.appendChild(svg('line', {
       x1: x, x2: x, y1: PAD_T, y2: H - PAD_B,
       stroke: '#f5f5f4',
@@ -252,7 +263,7 @@ function renderEconomyChart(state) {
   for (const id of ids) {
     const co = (state.companies || {})[id];
     const colour = COMPANY_COLOURS[co?.colour] || '#999';
-    const pts = history[id].map(p => `${xScale(p.ts).toFixed(1)},${yScale(p[metric] ?? 0).toFixed(1)}`).join(' ');
+    const pts = history[id].map(p => `${xScale(xOf(p)).toFixed(1)},${yScale(p[metric] ?? 0).toFixed(1)}`).join(' ');
     const last = history[id][history[id].length - 1]?.[metric] ?? 0;
     const name = co?.name || ('Company ' + (parseInt(id) + 1));
     // Wider transparent hit-line so the thin visible line is easier to hover,

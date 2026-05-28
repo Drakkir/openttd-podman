@@ -191,7 +191,9 @@ class LiveAdmin {
         this.sock.write(updateFreqPacket(UPDATE_COMPANY_INFO, FREQ_AUTOMATIC));
         this.sock.write(updateFreqPacket(UPDATE_COMPANY_ECONOMY, FREQ_MONTHLY | FREQ_WEEKLY));
         this.sock.write(updateFreqPacket(UPDATE_CHAT, FREQ_AUTOMATIC));
-        this.sock.write(updateFreqPacket(UPDATE_DATE, FREQ_ANUALLY | FREQ_POLL));
+        // Weekly so economy points get a fresh game-date stamp (admin port has
+        // no per-tick date; weekly is the finest granularity below monthly).
+        this.sock.write(updateFreqPacket(UPDATE_DATE, FREQ_WEEKLY | FREQ_ANUALLY | FREQ_POLL));
         this.sock.write(pollPacket(UPDATE_DATE, 0));
         this.sock.write(pollPacket(UPDATE_CLIENT_INFO));
         this.sock.write(pollPacket(UPDATE_COMPANY_INFO));
@@ -311,7 +313,7 @@ class LiveAdmin {
         this.state.companies[id] = co;
         // Append to time-series history so the dashboard can graph it.
         const hist = this.state.economyHistory[id] || [];
-        hist.push({ ts: Date.now(), money, loan, income, value: history[0]?.value || 0 });
+        hist.push({ ts: Date.now(), gameDate: this.state.date, money, loan, income, value: history[0]?.value || 0 });
         if (hist.length > this.economyMax) hist.splice(0, hist.length - this.economyMax);
         this.state.economyHistory[id] = hist;
         this.emitState();
