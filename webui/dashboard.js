@@ -239,17 +239,32 @@ function renderEconomyChart(state) {
     }, fmtVal(v)));
   }
 
-  // Polyline per company — colour already cross-references the Companies table.
+  // Polyline per company — colour cross-references the Companies table.
+  // Each line carries a <title> so hovering shows the company name + last value.
+  const metricLabel = $('#econ-metric').selectedOptions[0]?.text || metric;
+  const fmtMoneyShort = v => {
+    const a = Math.abs(v);
+    if (a >= 1e9) return (v/1e9).toFixed(2) + 'B';
+    if (a >= 1e6) return (v/1e6).toFixed(2) + 'M';
+    if (a >= 1e3) return (v/1e3).toFixed(0) + 'k';
+    return String(v);
+  };
   for (const id of ids) {
     const co = (state.companies || {})[id];
     const colour = COMPANY_COLOURS[co?.colour] || '#999';
     const pts = history[id].map(p => `${xScale(p.ts).toFixed(1)},${yScale(p[metric] ?? 0).toFixed(1)}`).join(' ');
-    const line = document.createElementNS(ns, 'polyline');
-    line.setAttribute('points', pts);
-    line.setAttribute('fill', 'none');
-    line.setAttribute('stroke', colour);
-    line.setAttribute('stroke-width', '2');
-    chart.appendChild(line);
+    const last = history[id][history[id].length - 1]?.[metric] ?? 0;
+    const name = co?.name || ('Company ' + (parseInt(id) + 1));
+    // Wider transparent hit-line so the thin visible line is easier to hover.
+    const hit = svg('polyline', {
+      points: pts, fill: 'none', stroke: 'transparent', 'stroke-width': '12',
+    });
+    hit.appendChild(svg('title', {}, `${name} — ${metricLabel}: ${fmtMoneyShort(last)}`));
+    chart.appendChild(hit);
+    chart.appendChild(svg('polyline', {
+      points: pts, fill: 'none', stroke: colour, 'stroke-width': '2',
+      'pointer-events': 'none',
+    }));
   }
 }
 

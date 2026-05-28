@@ -95,6 +95,7 @@
   border-radius: 4px;
   margin-bottom: 8px;
 }
+#econ-chart polyline[stroke="transparent"] { cursor: pointer; }
 
 .h2-actions {
   float: right;
