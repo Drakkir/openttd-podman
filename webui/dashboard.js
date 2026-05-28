@@ -49,7 +49,9 @@ function fmtMoney(v) {
 }
 
 let lastMapTs = 0;
+let lastState = null;
 function renderState(state) {
+  lastState = state;
   if (state.mapTs && state.mapTs !== lastMapTs) {
     lastMapTs = state.mapTs;
     const img = $('#map-img');
@@ -114,6 +116,9 @@ function renderState(state) {
   }
   $('#no-companies').classList.toggle('hidden', companies.length > 0);
 
+  // Economy chart
+  renderEconomyChart(state);
+
   // Chat
   const chat = state.chat || [];
   $('#chat-count').textContent = String(chat.length);
@@ -173,6 +178,92 @@ async function refreshMap() {
     btn.textContent = 'Refresh';
   }
 }
+
+function renderEconomyChart(state) {
+  const metric = $('#econ-metric').value;
+  const chart = $('#econ-chart');
+  const legend = $('#econ-legend');
+  if (!chart || !legend) return;
+  const history = state.economyHistory || {};
+  const ids = Object.keys(history).sort();
+  // Find global time + value range
+  let tMin = Infinity, tMax = -Infinity, vMin = Infinity, vMax = -Infinity;
+  for (const id of ids) {
+    for (const pt of history[id]) {
+      if (pt.ts < tMin) tMin = pt.ts;
+      if (pt.ts > tMax) tMax = pt.ts;
+      const v = pt[metric] ?? 0;
+      if (v < vMin) vMin = v;
+      if (v > vMax) vMax = v;
+    }
+  }
+  chart.innerHTML = '';
+  if (tMin === Infinity) {
+    legend.textContent = 'No economy data yet — wait a game-month for the first sample.';
+    return;
+  }
+  if (vMin === vMax) { vMin -= 1; vMax += 1; }
+  const W = 800, H = 240, PAD = 20;
+  const xScale = t => PAD + ((t - tMin) / Math.max(1, tMax - tMin)) * (W - 2 * PAD);
+  const yScale = v => H - PAD - ((v - vMin) / (vMax - vMin)) * (H - 2 * PAD);
+
+  const ns = 'http://www.w3.org/2000/svg';
+  function svg(name, attrs, text) {
+    const el = document.createElementNS(ns, name);
+    for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+    if (text != null) el.textContent = text;
+    return el;
+  }
+  // Y zero-line
+  if (vMin <= 0 && vMax >= 0) {
+    chart.appendChild(svg('line', {
+      x1: PAD, x2: W - PAD, y1: yScale(0), y2: yScale(0),
+      stroke: '#d6d3d1', 'stroke-dasharray': '3,3',
+    }));
+  }
+  // X-axis date labels (4 evenly spaced)
+  for (let i = 0; i <= 4; i++) {
+    const t = tMin + (tMax - tMin) * i / 4;
+    const x = xScale(t);
+    chart.appendChild(svg('text', {
+      x, y: H - 4, 'text-anchor': i === 0 ? 'start' : (i === 4 ? 'end' : 'middle'),
+      'font-size': '10', fill: '#78716c',
+    }, new Date(t).toLocaleString('sv-SE', { month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' })));
+    chart.appendChild(svg('line', {
+      x1: x, x2: x, y1: PAD, y2: H - PAD,
+      stroke: '#f5f5f4',
+    }));
+  }
+  // Y-axis value labels (top, mid, bottom)
+  const fmtVal = v => Math.abs(v) >= 1e6 ? (v/1e6).toFixed(1) + 'M' : Math.abs(v) >= 1e3 ? (v/1e3).toFixed(0) + 'k' : String(Math.round(v));
+  for (const v of [vMin, (vMin + vMax) / 2, vMax]) {
+    chart.appendChild(svg('text', {
+      x: PAD - 4, y: yScale(v) + 4, 'text-anchor': 'end',
+      'font-size': '10', fill: '#78716c',
+    }, fmtVal(v)));
+  }
+
+  // Polyline per company
+  const legendParts = [];
+  for (const id of ids) {
+    const co = (state.companies || {})[id];
+    const colour = COMPANY_COLOURS[co?.colour] || '#999';
+    const pts = history[id].map(p => `${xScale(p.ts).toFixed(1)},${yScale(p[metric] ?? 0).toFixed(1)}`).join(' ');
+    const line = document.createElementNS(ns, 'polyline');
+    line.setAttribute('points', pts);
+    line.setAttribute('fill', 'none');
+    line.setAttribute('stroke', colour);
+    line.setAttribute('stroke-width', '2');
+    chart.appendChild(line);
+    const name = co?.name || ('Company ' + (parseInt(id) + 1));
+    legendParts.push(`<span class="legend-item"><span class="colour-swatch" style="background:${colour};width:12px;height:12px;"></span> ${name}</span>`);
+  }
+  legend.innerHTML = legendParts.join(' &nbsp; ');
+}
+
+$('#econ-metric').addEventListener('change', () => {
+  if (lastState) renderEconomyChart(lastState);
+});
 
 $('#refresh-map').addEventListener('click', refreshMap);
 

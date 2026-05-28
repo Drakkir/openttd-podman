@@ -119,8 +119,10 @@ class LiveAdmin {
       clients: {},    // id → {name, hostname, language, joinDate, company}
       companies: {},  // id → {name, manager, colour, isAI, inauguratedYear, ...}
       chat: [],       // ring of recent chat messages
+      economyHistory: {}, // companyId → ring of {ts, money, loan, income, value}
     };
     this.chatMax = 100;
+    this.economyMax = 200;
     this.sock = null;
     this.buffered = Buffer.alloc(0);
     this.backoffMs = 1000;
@@ -307,6 +309,11 @@ class LiveAdmin {
         const co = this.state.companies[id] || { id };
         co.economy = { money, loan, income, cargo, history };
         this.state.companies[id] = co;
+        // Append to time-series history so the dashboard can graph it.
+        const hist = this.state.economyHistory[id] || [];
+        hist.push({ ts: Date.now(), money, loan, income, value: history[0]?.value || 0 });
+        if (hist.length > this.economyMax) hist.splice(0, hist.length - this.economyMax);
+        this.state.economyHistory[id] = hist;
         this.emitState();
         break;
       }

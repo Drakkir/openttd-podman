@@ -45,6 +45,20 @@
     </form>
   </section>
   <section class="card">
+    <h2>Economy
+      <span class="h2-actions">
+        <select id="econ-metric" class="btn" style="font-size:11px;padding:3px 6px;">
+          <option value="money">Cash</option>
+          <option value="loan">Loan</option>
+          <option value="income">Income</option>
+          <option value="value">Value</option>
+        </select>
+      </span>
+    </h2>
+    <svg id="econ-chart" viewBox="0 0 800 240" preserveAspectRatio="none"></svg>
+    <div id="econ-legend"></div>
+  </section>
+  <section class="card">
     <h2>Map <button id="refresh-map" class="btn" type="button" style="float:right;font-size:11px;padding:4px 9px;">Refresh</button></h2>
     <div id="map-wrap">
       <img id="map-img" alt="" hidden>

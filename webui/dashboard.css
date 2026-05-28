@@ -79,6 +79,21 @@
   vertical-align: middle;
 }
 
+#econ-chart {
+  width: 100%;
+  height: 240px;
+  background: #fafaf9;
+  border: 1px solid #e7e5e4;
+  border-radius: 4px;
+  margin-bottom: 8px;
+}
+#econ-legend {
+  font-size: 12px;
+  color: #57534e;
+  line-height: 1.8;
+}
+.legend-item { display: inline-block; margin-right: 12px; }
+
 .h2-actions {
   float: right;
   display: flex;
