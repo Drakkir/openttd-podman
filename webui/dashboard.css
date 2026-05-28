@@ -95,12 +95,6 @@
   border-radius: 4px;
   margin-bottom: 8px;
 }
-#econ-legend {
-  font-size: 12px;
-  color: #57534e;
-  line-height: 1.8;
-}
-.legend-item { display: inline-block; margin-right: 12px; }
 
 .h2-actions {
   float: right;

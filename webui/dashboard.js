@@ -182,8 +182,7 @@ async function refreshMap() {
 function renderEconomyChart(state) {
   const metric = $('#econ-metric').value;
   const chart = $('#econ-chart');
-  const legend = $('#econ-legend');
-  if (!chart || !legend) return;
+  if (!chart) return;
   const history = state.economyHistory || {};
   const ids = Object.keys(history).sort();
   // Find global time + value range
@@ -198,10 +197,7 @@ function renderEconomyChart(state) {
     }
   }
   chart.innerHTML = '';
-  if (tMin === Infinity) {
-    legend.textContent = 'No economy data yet — wait a game-month for the first sample.';
-    return;
-  }
+  if (tMin === Infinity) return;
   if (vMin === vMax) { vMin -= 1; vMax += 1; }
   const W = 800, H = 240, PAD = 20;
   const xScale = t => PAD + ((t - tMin) / Math.max(1, tMax - tMin)) * (W - 2 * PAD);
@@ -243,8 +239,7 @@ function renderEconomyChart(state) {
     }, fmtVal(v)));
   }
 
-  // Polyline per company
-  const legendParts = [];
+  // Polyline per company — colour already cross-references the Companies table.
   for (const id of ids) {
     const co = (state.companies || {})[id];
     const colour = COMPANY_COLOURS[co?.colour] || '#999';
@@ -255,10 +250,7 @@ function renderEconomyChart(state) {
     line.setAttribute('stroke', colour);
     line.setAttribute('stroke-width', '2');
     chart.appendChild(line);
-    const name = co?.name || ('Company ' + (parseInt(id) + 1));
-    legendParts.push(`<span class="legend-item"><span class="colour-swatch" style="background:${colour};width:12px;height:12px;"></span> ${name}</span>`);
   }
-  legend.innerHTML = legendParts.join(' &nbsp; ');
 }
 
 $('#econ-metric').addEventListener('change', () => {
