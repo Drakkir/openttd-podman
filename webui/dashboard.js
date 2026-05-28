@@ -255,11 +255,16 @@ function renderEconomyChart(state) {
     const pts = history[id].map(p => `${xScale(p.ts).toFixed(1)},${yScale(p[metric] ?? 0).toFixed(1)}`).join(' ');
     const last = history[id][history[id].length - 1]?.[metric] ?? 0;
     const name = co?.name || ('Company ' + (parseInt(id) + 1));
-    // Wider transparent hit-line so the thin visible line is easier to hover.
+    // Wider transparent hit-line so the thin visible line is easier to hover,
+    // with a custom tooltip that shows immediately (no native title delay).
     const hit = svg('polyline', {
       points: pts, fill: 'none', stroke: 'transparent', 'stroke-width': '12',
     });
-    hit.appendChild(svg('title', {}, `${name} — ${metricLabel}: ${fmtMoneyShort(last)}`));
+    const label = `${name} — ${metricLabel}: ${fmtMoneyShort(last)}`;
+    const tip = $('#econ-tip');
+    hit.addEventListener('mouseenter', () => { tip.textContent = label; tip.hidden = false; });
+    hit.addEventListener('mousemove', e => { tip.style.left = e.clientX + 'px'; tip.style.top = e.clientY + 'px'; });
+    hit.addEventListener('mouseleave', () => { tip.hidden = true; });
     chart.appendChild(hit);
     chart.appendChild(svg('polyline', {
       points: pts, fill: 'none', stroke: colour, 'stroke-width': '2',
