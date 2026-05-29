@@ -731,6 +731,11 @@ const server = http.createServer(async (req, res) => {
       const parsed = JSON.parse((await readBody(req)) || '{}');
       const settings = Array.isArray(parsed.settings) ? parsed.settings : [];
       await applySettingsToCfg(settings, { staged: true });
+      // A fresh start discards the current game — wipe the old map snapshots
+      // (files + history) now so the dashboard doesn't keep showing the
+      // previous game's minimaps. (The admin reconnects to the already-started
+      // new game and never receives a NEWGAME packet.)
+      await clearMapHistory();
       const sentinel = path.join(DATA_ROOT, '.no-resume');
       await fs.promises.writeFile(sentinel, 'set ' + new Date().toISOString() + '\n');
       console.log(`[${new Date().toISOString()}] sentinel + staged cfg ready`);
@@ -925,6 +930,18 @@ async function doTakeMapScreenshot() {
     mapTs = Date.now();
     if (year != null) {
       const file = `${baseName}.png`;
+      // Game reset (fresh start / older save): a snapshot that predates the
+      // existing history means the old game is gone. The admin reconnects to an
+      // already-running new game and never sees a NEWGAME packet, so wipe the
+      // stale snapshots + their files here instead.
+      const thisKey = sortKey({ year, month });
+      const maxKey = mapHistory.reduce((m, e) => Math.max(m, sortKey(e)), -1);
+      if (mapHistory.length && thisKey < maxKey) {
+        for (const e of mapHistory) {
+          try { await fs.promises.unlink(path.join(SCREENSHOT_DIR, e.file)); } catch {}
+        }
+        mapHistory = [];
+      }
       const existing = mapHistory.find(e => e.year === year && e.month === month);
       if (existing) { existing.ts = mapTs; existing.file = file; }
       else { mapHistory.push({ year, month, ts: mapTs, file }); mapHistory.sort((a, b) => sortKey(a) - sortKey(b)); }
@@ -983,8 +1000,8 @@ const live = new LiveAdmin({
     prevConnected = state.connected;
     broadcast();
   },
-  onMonthChange: (year, month) => {
-    console.log(`[live] month rolled over to ${year}-${String(month+1).padStart(2,'0')} — taking map snapshot`);
+  onYearChange: (year) => {
+    console.log(`[live] year rolled over to ${year} — taking map snapshot`);
     takeMapScreenshot();
   },
   onNewGame: () => {

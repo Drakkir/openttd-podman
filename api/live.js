@@ -117,15 +117,14 @@ function readAdminPassword(secretsPath) {
 }
 
 class LiveAdmin {
-  constructor({ host, port, dataDir, onState, onMonthChange, onNewGame }) {
+  constructor({ host, port, dataDir, onState, onYearChange, onNewGame }) {
     this.host = host;
     this.port = port;
     this.secretsPath = path.join(dataDir, 'secrets.cfg');
     this.onState = onState;
-    this.onMonthChange = onMonthChange;
+    this.onYearChange = onYearChange;
     this.onNewGame = onNewGame;
-    this.prevYear = null;  // still tracked: read by the month-change condition
-    this.prevMonth = null;
+    this.prevYear = null;
     this.state = {
       connected: false,
       serverName: null,
@@ -246,11 +245,11 @@ class LiveAdmin {
         this.state.date = date;
         this.state.year = year;
         this.state.month = month;
-        if (this.prevMonth !== null && (month !== this.prevMonth || year !== this.prevYear) && this.onMonthChange) {
-          this.onMonthChange(year, month);
+        // One map snapshot per game-year (monthly was far too many files).
+        if (this.prevYear !== null && year !== this.prevYear && this.onYearChange) {
+          this.onYearChange(year);
         }
         this.prevYear = year;
-        this.prevMonth = month;
         this.emitState();
         break;
       }
