@@ -48,6 +48,30 @@ function startContainer(name) {
   });
 }
 
+// Stop with a grace period (SIGTERM, not SIGKILL) so OpenTTD runs its clean
+// shutdown — which, with autosave_on_exit, writes a resumable savegame. The
+// engine's /restart endpoint kills too fast for that, so we stop+start instead.
+function stopContainer(name, timeoutSec = 15) {
+  return new Promise((resolve, reject) => {
+    if (!CONTAINER_SOCKET) return reject(new Error('no container socket'));
+    const req = http.request({
+      socketPath: CONTAINER_SOCKET,
+      method: 'POST',
+      path: `/containers/${encodeURIComponent(name)}/stop?t=${timeoutSec}`,
+      headers: { Host: 'container-engine' },
+    }, res => {
+      let body = '';
+      res.on('data', c => body += c);
+      res.on('end', () => {
+        if (res.statusCode === 204 || res.statusCode === 304) resolve();
+        else reject(new Error(`stop ${name}: HTTP ${res.statusCode} ${body.slice(0, 200)}`));
+      });
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
 function inspectContainer(name) {
   return new Promise((resolve, reject) => {
     if (!CONTAINER_SOCKET) return reject(new Error('no container socket'));
@@ -979,12 +1003,14 @@ async function bootSave() {
   }
 }
 
+let firstBootKicked = false;
 const live = new LiveAdmin({
   host: OPENTTD_HOST,
   port: OPENTTD_ADMIN_PORT,
   dataDir: DATA_DIR,
   onState: state => {
     latestState = state;
+    if (state.connected) firstBootKicked = true;  // healthy — cancel the recovery kick
     if (state.connected && !prevConnected && !bootSavePending) {
       // openttd just (re)booted — wait briefly for it to fully load, then
       // capture a fresh autosave so a subsequent quit always has a recent
@@ -1009,6 +1035,29 @@ const live = new LiveAdmin({
     clearMapHistory();
   },
 });
+// First-boot admin-port recovery. On a brand-new container, OpenTTD's first
+// dedicated boot doesn't open the admin port (3977) — it only starts listening
+// after a container restart (confirmed: a plain `podman restart` opens it even
+// with a fresh game + minimal cfg). Without this, a blank-slate deploy would
+// leave the web UI unable to reach the server. If the container is up but the
+// admin client hasn't connected within a grace period, restart openttd once.
+setTimeout(async () => {
+  if (firstBootKicked || (latestState && latestState.connected) || !CONTAINER_SOCKET) return;
+  try {
+    const info = await inspectContainer(CONTAINER_NAME);
+    if (!(info.State && info.State.Running)) return;
+    firstBootKicked = true;
+    console.log('[first-boot] admin port not open after grace period — restarting openttd once');
+    // Stop (clean, so OpenTTD saves on exit) then start: the next boot resumes
+    // that save, and OpenTTD reliably opens the admin port on a resume (it does
+    // not always do so on a freshly-generated game).
+    await stopContainer(CONTAINER_NAME);
+    await startContainer(CONTAINER_NAME);
+  } catch (e) {
+    console.log('[first-boot] recovery failed:', e.message);
+  }
+}, 30_000);
+
 wss.on('connection', ws => {
   if (latestState) ws.send(JSON.stringify({ type: 'state', state: mapStatePayload(latestState) }));
 });
