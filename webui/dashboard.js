@@ -48,26 +48,53 @@ function fmtMoney(v) {
   return String(v);
 }
 
-let lastMapTs = 0;
 let lastState = null;
+let lastChatKey = '';
+// mapIndex points into state.mapHistory; null means "stick to latest".
+let mapIndex = null;
+function renderMap(state) {
+  const history = state.mapHistory || [];
+  const img = $('#map-img');
+  const empty = $('#map-empty');
+  const yearLabel = $('#map-year');
+  const prev = $('#map-prev');
+  const next = $('#map-next');
+  if (history.length === 0) {
+    img.hidden = true;
+    empty.classList.remove('hidden');
+    yearLabel.textContent = '—';
+    prev.disabled = true;
+    next.disabled = true;
+    return;
+  }
+  // Default: stick to latest. User can pin via prev/next.
+  const idx = mapIndex == null ? history.length - 1 : Math.min(mapIndex, history.length - 1);
+  const entry = history[idx];
+  img.src = '/api/screenshot/' + entry.file + '?t=' + entry.ts;
+  img.hidden = false;
+  empty.classList.add('hidden');
+  const MONTHS = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+  yearLabel.textContent = entry.month != null
+    ? `${entry.year}-${MONTHS[entry.month]}`
+    : String(entry.year);
+  prev.disabled = idx === 0;
+  next.disabled = idx === history.length - 1;
+}
 function renderState(state) {
   lastState = state;
-  if (state.mapTs && state.mapTs !== lastMapTs) {
-    lastMapTs = state.mapTs;
-    const img = $('#map-img');
-    if (img) {
-      img.src = '/api/screenshot/live-map.png?t=' + state.mapTs;
-      img.hidden = false;
-      $('#map-empty').classList.add('hidden');
-    }
-  }
+  // renderMap cache-busts per entry via entry.ts, so it's safe to call on
+  // every frame; no separate change-gate needed.
+  if (state.mapHistory) renderMap(state);
   const status = $('#conn-status');
+  // Match the config page's three-state dot: green = openttd connected,
+  // orange = api up but openttd unreachable, grey = no WebSocket frames yet.
+  status.classList.remove('online', 'warning');
   if (state.connected) {
     status.classList.add('online');
     status.title = 'Live admin connected';
   } else {
-    status.classList.remove('online');
-    status.title = 'Admin port unreachable';
+    status.classList.add('warning');
+    status.title = 'OpenTTD admin port unreachable';
   }
 
   const yearPart = state.year != null ? ` — year ${state.year}` : '';
@@ -123,8 +150,15 @@ function renderState(state) {
   const chat = state.chat || [];
   $('#chat-count').textContent = String(chat.length);
   const log = $('#chat-log');
-  // Render only new messages — keep scroll position unless user is at bottom.
-  if (log.childElementCount !== chat.length) {
+  // Re-render when the contents change. The server caps the ring at 100, so a
+  // plain length check freezes once full (length pins at 100). Key on first +
+  // last message ts + length: at the cap the window still slides each new
+  // message, so first/last ts change even though length stays 100.
+  const chatKey = chat.length
+    ? `${chat.length}:${chat[0].ts}:${chat[chat.length - 1].ts}`
+    : '0';
+  if (chatKey !== lastChatKey) {
+    lastChatKey = chatKey;
     const wasAtBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 32;
     log.innerHTML = '';
     for (const m of chat) {
@@ -152,8 +186,9 @@ function connect() {
     } catch (e) { console.error('bad ws frame', e); }
   };
   ws.onclose = () => {
-    $('#conn-status').classList.remove('online');
-    $('#conn-status').title = 'WebSocket closed — reconnecting…';
+    const s = $('#conn-status');
+    s.classList.remove('online', 'warning');
+    s.title = 'WebSocket closed — reconnecting…';
     setTimeout(connect, 2000);
   };
   ws.onerror = () => { /* close handler will reconnect */ };
@@ -167,10 +202,15 @@ async function refreshMap() {
     const r = await fetch('/api/map-screenshot', { method: 'POST' });
     const data = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(data.error || 'HTTP ' + r.status);
-    const img = $('#map-img');
-    img.src = '/api/screenshot/live-map.png?t=' + (data.ts || Date.now());
-    img.hidden = false;
-    $('#map-empty').classList.add('hidden');
+    // Snap back to latest after a manual refresh so the user sees what
+    // they just captured, even if they were browsing older snapshots.
+    mapIndex = null;
+    // The WebSocket broadcast will deliver the new mapHistory; renderMap
+    // updates from there. If lastState is fresh we can render immediately.
+    if (lastState && data.history) {
+      lastState.mapHistory = data.history;
+      renderMap(lastState);
+    }
   } catch (e) {
     $('#map-empty').textContent = 'Map snapshot failed: ' + e.message;
   } finally {
@@ -185,18 +225,43 @@ function renderEconomyChart(state) {
   if (!chart) return;
   const history = state.economyHistory || {};
   const ids = Object.keys(history).sort();
-  // Find global time + value range
-  // X axis is OpenTTD calendar days (gameDate); fall back to wall-clock ts if absent.
-  const xOf = pt => (pt.gameDate != null ? pt.gameDate : pt.ts);
+  // Find global time + value range. X axis is OpenTTD calendar days
+  // (gameDate). Points missing gameDate get skipped — wall-clock ts must
+  // never leak into a game-date formatter. The window dropdown clips
+  // visible points to the last N game-years.
+  const xOf = pt => pt.gameDate;
+  const windowYears = parseInt($('#econ-window')?.value || '0', 10);
+  let cutoff = null;
+  if (windowYears > 0 && state.date != null) {
+    cutoff = state.date - Math.round(windowYears * 365.25);
+  }
+  const visiblePoints = id => (history[id] || []).filter(p =>
+    typeof p.gameDate === 'number' && (cutoff == null || p.gameDate >= cutoff)
+  );
   let tMin = Infinity, tMax = -Infinity, vMin = Infinity, vMax = -Infinity;
   for (const id of ids) {
-    for (const pt of history[id]) {
+    for (const pt of visiblePoints(id)) {
       const x = xOf(pt);
       if (x < tMin) tMin = x;
       if (x > tMax) tMax = x;
       const v = pt[metric] ?? 0;
       if (v < vMin) vMin = v;
       if (v > vMax) vMax = v;
+    }
+  }
+  // X axis spans the chosen window even when data is sparse. For "All"
+  // (cutoff=null) we fall back to the earliest company's inauguratedYear
+  // as a proxy for game-start year so the axis reads "1950 → now" instead
+  // of just "wherever the oldest ring point sits".
+  if (state.date != null) {
+    tMax = state.date;
+    if (cutoff != null) {
+      tMin = cutoff;
+    } else if (typeof state.startingYear === 'number') {
+      // "All" anchors to the server's configured start year so a scenario
+      // that begins in 1970 shows an axis from 1970, not from when the
+      // first company was inaugurated.
+      tMin = state.startingYear * 365.25;
     }
   }
   chart.innerHTML = '';
@@ -226,7 +291,9 @@ function renderEconomyChart(state) {
     const year = Math.floor(d / 365.25);
     const dayOfYear = Math.max(0, Math.floor(d - year * 365.25));
     const month = Math.min(11, Math.floor(dayOfYear / 30.4));
-    const dayOfMonth = Math.max(1, dayOfYear - Math.floor(month * 30.4) + 1);
+    // Clamp to 30: the model is only month-accurate (30.4-day buckets), so
+    // without this the last bucket of the year can produce day 31/32.
+    const dayOfMonth = Math.min(30, Math.max(1, dayOfYear - Math.floor(month * 30.4) + 1));
     const mm = String(month + 1).padStart(2, '0');
     const dd = String(dayOfMonth).padStart(2, '0');
     return `${year}-${mm}-${dd}`;
@@ -252,8 +319,9 @@ function renderEconomyChart(state) {
     }, fmtVal(v)));
   }
 
-  // Polyline per company — colour cross-references the Companies table.
-  // Each line carries a <title> so hovering shows the company name + last value.
+  // Polyline per company. Hover snaps a crosshair to the nearest data
+  // point on that company's line and shows date + exact value at the
+  // hovered point.
   const metricLabel = $('#econ-metric').selectedOptions[0]?.text || metric;
   const fmtMoneyShort = v => {
     const a = Math.abs(v);
@@ -262,35 +330,93 @@ function renderEconomyChart(state) {
     if (a >= 1e3) return (v/1e3).toFixed(0) + 'k';
     return String(v);
   };
+  // Shared crosshair guide + dot, positioned by whichever line is hovered.
+  const guide = svg('line', {
+    x1: 0, x2: 0, y1: PAD_T, y2: H - PAD_B,
+    stroke: '#a8a29e', 'stroke-dasharray': '3,3',
+    'pointer-events': 'none', visibility: 'hidden',
+  });
+  const dot = svg('circle', {
+    r: 4, fill: '#fff', stroke: '#1c1917', 'stroke-width': '1.5',
+    'pointer-events': 'none', visibility: 'hidden',
+  });
+  const tip = $('#econ-tip');
+  const hideCrosshair = () => {
+    tip.hidden = true;
+    guide.setAttribute('visibility', 'hidden');
+    dot.setAttribute('visibility', 'hidden');
+  };
   for (const id of ids) {
+    const points = visiblePoints(id);
+    if (points.length === 0) continue;
     const co = (state.companies || {})[id];
     const colour = COMPANY_COLOURS[co?.colour] || '#999';
-    const pts = history[id].map(p => `${xScale(xOf(p)).toFixed(1)},${yScale(p[metric] ?? 0).toFixed(1)}`).join(' ');
-    const last = history[id][history[id].length - 1]?.[metric] ?? 0;
+    const pts = points.map(p => `${xScale(xOf(p)).toFixed(1)},${yScale(p[metric] ?? 0).toFixed(1)}`).join(' ');
     const name = co?.name || ('Company ' + (parseInt(id) + 1));
-    // Wider transparent hit-line so the thin visible line is easier to hover,
-    // with a custom tooltip that shows immediately (no native title delay).
     const hit = svg('polyline', {
       points: pts, fill: 'none', stroke: 'transparent', 'stroke-width': '12',
     });
-    const label = `${name} — ${metricLabel}: ${fmtMoneyShort(last)}`;
-    const tip = $('#econ-tip');
-    hit.addEventListener('mouseenter', () => { tip.textContent = label; tip.hidden = false; });
-    hit.addEventListener('mousemove', e => { tip.style.left = e.clientX + 'px'; tip.style.top = e.clientY + 'px'; });
-    hit.addEventListener('mouseleave', () => { tip.hidden = true; });
+    hit.addEventListener('mousemove', e => {
+      const ctm = chart.getScreenCTM();
+      if (!ctm) return;
+      const svgPt = chart.createSVGPoint();
+      svgPt.x = e.clientX; svgPt.y = e.clientY;
+      const local = svgPt.matrixTransform(ctm.inverse());
+      let nearest = null, bestDx = Infinity;
+      for (const p of points) {
+        const dx = Math.abs(xScale(xOf(p)) - local.x);
+        if (dx < bestDx) { bestDx = dx; nearest = p; }
+      }
+      if (!nearest) return;
+      const nx = xScale(xOf(nearest));
+      const ny = yScale(nearest[metric] ?? 0);
+      guide.setAttribute('x1', nx);
+      guide.setAttribute('x2', nx);
+      guide.setAttribute('visibility', 'visible');
+      dot.setAttribute('cx', nx);
+      dot.setAttribute('cy', ny);
+      dot.setAttribute('stroke', colour);
+      dot.setAttribute('visibility', 'visible');
+      tip.textContent = `${name} — ${fmtGameDate(xOf(nearest))} — ${metricLabel}: ${fmtMoneyShort(nearest[metric] ?? 0)}`;
+      tip.style.left = e.clientX + 'px';
+      tip.style.top = e.clientY + 'px';
+      tip.hidden = false;
+    });
+    hit.addEventListener('mouseleave', hideCrosshair);
     chart.appendChild(hit);
     chart.appendChild(svg('polyline', {
       points: pts, fill: 'none', stroke: colour, 'stroke-width': '2',
       'pointer-events': 'none',
     }));
   }
+  chart.appendChild(guide);
+  chart.appendChild(dot);
 }
 
 $('#econ-metric').addEventListener('change', () => {
   if (lastState) renderEconomyChart(lastState);
 });
+$('#econ-window').addEventListener('change', () => {
+  if (lastState) renderEconomyChart(lastState);
+});
 
 $('#refresh-map').addEventListener('click', refreshMap);
+$('#map-prev').addEventListener('click', () => {
+  const hist = (lastState && lastState.mapHistory) || [];
+  if (hist.length === 0) return;
+  const cur = mapIndex == null ? hist.length - 1 : mapIndex;
+  mapIndex = Math.max(0, cur - 1);
+  renderMap(lastState);
+});
+$('#map-next').addEventListener('click', () => {
+  const hist = (lastState && lastState.mapHistory) || [];
+  if (hist.length === 0) return;
+  const cur = mapIndex == null ? hist.length - 1 : mapIndex;
+  if (cur >= hist.length - 1) { mapIndex = null; renderMap(lastState); return; }
+  mapIndex = cur + 1;
+  if (mapIndex === hist.length - 1) mapIndex = null; // back to "follow latest"
+  renderMap(lastState);
+});
 
 async function refreshAiList() {
   const sel = $('#ai-pick');

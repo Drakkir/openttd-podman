@@ -45,13 +45,26 @@ const FREQ_MONTHLY = 0x08;
 const FREQ_ANUALLY = 0x20;
 const FREQ_AUTOMATIC = 0x40;
 
+// Thrown when a packet is shorter than the handler expects, so parseFrames
+// can skip the bad frame instead of crashing the process.
+class ProtocolError extends Error {}
+
 // Stream-based packet reader for null-terminated strings + integers.
+// Every read is bounds-checked: a truncated/malformed frame throws
+// ProtocolError rather than letting Buffer.read* throw RangeError, which
+// would otherwise take down the whole Node process.
 class Reader {
   constructor(buf) { this.buf = buf; this.off = 0; }
-  u8() { const v = this.buf.readUInt8(this.off); this.off += 1; return v; }
-  u16() { const v = this.buf.readUInt16LE(this.off); this.off += 2; return v; }
-  u32() { const v = this.buf.readUInt32LE(this.off); this.off += 4; return v; }
+  need(n) {
+    if (this.off + n > this.buf.length) {
+      throw new ProtocolError(`read ${n}B at ${this.off} exceeds ${this.buf.length}B payload`);
+    }
+  }
+  u8() { this.need(1); const v = this.buf.readUInt8(this.off); this.off += 1; return v; }
+  u16() { this.need(2); const v = this.buf.readUInt16LE(this.off); this.off += 2; return v; }
+  u32() { this.need(4); const v = this.buf.readUInt32LE(this.off); this.off += 4; return v; }
   i64() {
+    this.need(8);
     const v = this.buf.readBigInt64LE(this.off); this.off += 8; return Number(v);
   }
   str() {
@@ -104,13 +117,15 @@ function readAdminPassword(secretsPath) {
 }
 
 class LiveAdmin {
-  constructor({ host, port, dataDir, onState, onYearChange }) {
+  constructor({ host, port, dataDir, onState, onMonthChange, onNewGame }) {
     this.host = host;
     this.port = port;
     this.secretsPath = path.join(dataDir, 'secrets.cfg');
     this.onState = onState;
-    this.onYearChange = onYearChange;
-    this.prevYear = null;
+    this.onMonthChange = onMonthChange;
+    this.onNewGame = onNewGame;
+    this.prevYear = null;  // still tracked: read by the month-change condition
+    this.prevMonth = null;
     this.state = {
       connected: false,
       serverName: null,
@@ -122,7 +137,7 @@ class LiveAdmin {
       economyHistory: {}, // companyId → ring of {ts, money, loan, income, value}
     };
     this.chatMax = 100;
-    this.economyMax = 200;
+    this.economyMax = 2000;
     this.sock = null;
     this.buffered = Buffer.alloc(0);
     this.backoffMs = 1000;
@@ -155,6 +170,10 @@ class LiveAdmin {
 
     const handleClose = () => {
       this.state.connected = false;
+      // Drop any partial frame from the dead connection — otherwise the next
+      // connection's bytes get concatenated onto stale tail bytes and the
+      // frame parser desyncs (or wedges on a bogus length).
+      this.buffered = Buffer.alloc(0);
       this.emitState();
       console.log(`[live] disconnected; reconnect in ${this.backoffMs}ms`);
       setTimeout(() => this.connect(), this.backoffMs);
@@ -167,11 +186,27 @@ class LiveAdmin {
   parseFrames() {
     while (this.buffered.length >= 3) {
       const len = this.buffered.readUInt16LE(0);
+      // A frame is at least header-sized (2B length + 1B type). A smaller
+      // value means the stream is desynced; resync by dropping the buffer
+      // rather than spinning forever on a slice that never advances.
+      if (len < 3) {
+        console.log(`[live] bad frame length ${len}; resetting buffer`);
+        this.buffered = Buffer.alloc(0);
+        break;
+      }
       if (this.buffered.length < len) break;
       const type = this.buffered.readUInt8(2);
       const payload = this.buffered.slice(3, len);
       this.buffered = this.buffered.slice(len);
-      this.handle(type, payload);
+      try {
+        this.handle(type, payload);
+      } catch (err) {
+        if (err instanceof ProtocolError) {
+          console.log(`[live] skipping malformed packet type ${type}: ${err.message}`);
+        } else {
+          throw err;
+        }
+      }
     }
   }
 
@@ -202,15 +237,20 @@ class LiveAdmin {
       }
       case PKT_SERVER_DATE: {
         const date = r.u32();
-        // OpenTTD calendar date is days since year 0. Approximate year — good
-        // enough for "did the year roll over" detection.
+        // OpenTTD calendar date is days since year 0. Months/years are
+        // approximate (real OpenTTD calendar handles leap years); we only
+        // need stable boundary detection for snapshot triggers.
         const year = Math.floor(date / 365.25);
+        const dayOfYear = date - Math.floor(year * 365.25);
+        const month = Math.min(11, Math.max(0, Math.floor(dayOfYear / 30.4)));
         this.state.date = date;
         this.state.year = year;
-        if (this.prevYear !== null && year !== this.prevYear && this.onYearChange) {
-          this.onYearChange(year);
+        this.state.month = month;
+        if (this.prevMonth !== null && (month !== this.prevMonth || year !== this.prevYear) && this.onMonthChange) {
+          this.onMonthChange(year, month);
         }
         this.prevYear = year;
+        this.prevMonth = month;
         this.emitState();
         break;
       }
@@ -311,9 +351,16 @@ class LiveAdmin {
         const co = this.state.companies[id] || { id };
         co.economy = { money, loan, income, cargo, history };
         this.state.companies[id] = co;
-        // Append to time-series history so the dashboard can graph it.
-        const hist = this.state.economyHistory[id] || [];
-        hist.push({ ts: Date.now(), gameDate: this.state.date, money, loan, income, value: history[0]?.value || 0 });
+        // Append to time-series history. If game-date moved backwards (fresh
+        // game after a restart, save reload, etc.), drop the old series for
+        // this company so the chart doesn't draw a line jumping across years.
+        let hist = this.state.economyHistory[id] || [];
+        const gd = this.state.date;
+        if (hist.length > 0 && gd != null) {
+          const last = hist[hist.length - 1];
+          if (last.gameDate != null && gd < last.gameDate) hist = [];
+        }
+        hist.push({ ts: Date.now(), gameDate: gd, money, loan, income, value: history[0]?.value || 0 });
         if (hist.length > this.economyMax) hist.splice(0, hist.length - this.economyMax);
         this.state.economyHistory[id] = hist;
         this.emitState();
@@ -323,7 +370,9 @@ class LiveAdmin {
       case PKT_SERVER_SHUTDOWN:
         this.state.clients = {};
         this.state.companies = {};
+        this.state.economyHistory = {};
         this.emitState();
+        if (type === PKT_SERVER_NEWGAME && this.onNewGame) this.onNewGame();
         break;
       case PKT_SERVER_FULL:
       case PKT_SERVER_BANNED:

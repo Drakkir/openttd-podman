@@ -27,9 +27,8 @@ services:
     volumes:
       - ./data:/data
     user: "1000:1000"
-    dns:
-      - 9.9.9.9
-    # Pin the IPv4 since container has no IPv6 routing in rootless podman.
+    # Pin the IPv4 since the container has no IPv6 routing in rootless podman.
+    # (No custom dns: — let the container inherit the host resolver.)
     extra_hosts:
       - "content.openttd.org:84.235.161.209"
 

@@ -2,6 +2,7 @@
 'use strict';
 
 const http = require('http');
+const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const { rconQuit, rconSaveAndQuit, rconCommands, rconQuery } = require('./admin');
@@ -71,6 +72,67 @@ function inspectContainer(name) {
   });
 }
 
+// Poll until the container has actually exited, then start it again. Used
+// after rconQuit/rconSaveAndQuit: with restart: "no" the container stays
+// down after the game quits, so the API must bring it back up. Polling beats
+// a fixed sleep — if we call start while the old container is still running
+// the engine returns 304 and the staged cfg / sentinel never get applied.
+async function restartAfterExit(name, { timeoutMs = 20_000, intervalMs = 500 } = {}) {
+  if (!CONTAINER_SOCKET) return { restarted: false, reason: 'no container socket' };
+  const deadline = Date.now() + timeoutMs;
+  // Wait for Running === false (or the inspect to 404, meaning gone).
+  while (Date.now() < deadline) {
+    let running = true;
+    try {
+      const info = await inspectContainer(name);
+      running = !!(info.State && info.State.Running);
+    } catch {
+      running = false; // can't inspect → assume not running, let start decide
+    }
+    if (!running) break;
+    await new Promise(r => setTimeout(r, intervalMs));
+  }
+  const r = await startContainer(name);
+  return { restarted: !r.already, already: r.already };
+}
+
+// Fallback installer for AdmiralAI when BaNaNaS is unreachable / 502.
+// Pulls the latest nightly tar from openttdcoop directly. Returns the
+// landed filename relative to the AI dir.
+function httpsGet(url, redirectsLeft = 3) {
+  return new Promise((resolve, reject) => {
+    https.get(url, { headers: { 'User-Agent': 'openttd-podman-installer' } }, res => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && redirectsLeft > 0) {
+        res.resume();
+        return resolve(httpsGet(new URL(res.headers.location, url).href, redirectsLeft - 1));
+      }
+      if (res.statusCode !== 200) {
+        res.resume();
+        return reject(new Error('HTTP ' + res.statusCode + ' from ' + url));
+      }
+      const chunks = [];
+      res.on('data', c => chunks.push(c));
+      res.on('end', () => resolve(Buffer.concat(chunks)));
+      res.on('error', reject);
+    }).on('error', reject);
+  });
+}
+
+async function installAdmiralAIFromOpenttdcoop() {
+  const indexUrl = 'https://bundles.openttdcoop.org/ai-admiralai/nightlies/LATEST/';
+  const html = (await httpsGet(indexUrl)).toString('utf-8');
+  const m = html.match(/href="(AdmiralAI-\d+\.tar)"/);
+  if (!m) throw new Error('AdmiralAI-N.tar link not found in ' + indexUrl);
+  const fileName = m[1];
+  const tarUrl = indexUrl + fileName;
+  const tar = await httpsGet(tarUrl);
+  const aiDir = path.join(DATA_ROOT, '.local/share/openttd/ai');
+  await fs.promises.mkdir(aiDir, { recursive: true });
+  const target = path.join(aiDir, fileName);
+  await fs.promises.writeFile(target, tar);
+  return { file: fileName, bytes: tar.length };
+}
+
 function readAdminPassword() {
   try {
     const text = fs.readFileSync(path.join(DATA_DIR, 'secrets.cfg'), 'utf-8');
@@ -79,6 +141,14 @@ function readAdminPassword() {
   } catch {
     return '';
   }
+}
+
+// Quote a string for use as a single rcon argument. Escapes backslashes
+// before double-quotes (otherwise a trailing backslash escapes the closing
+// quote) and strips control chars / newlines that would corrupt the command.
+function rconQuoteArg(v) {
+  const clean = String(v).replace(/[\x00-\x1f\x7f]/g, '');
+  return clean.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 }
 
 const DATA_DIR = process.env.DATA_DIR || '/data/.config/openttd';
@@ -202,11 +272,16 @@ const server = http.createServer(async (req, res) => {
         const st = await fs.promises.stat(logPath);
         const tailBytes = Math.min(st.size, 64 * 1024);
         const start = st.size - tailBytes;
-        const fd = await fs.promises.open(logPath, 'r');
-        const buf = Buffer.alloc(tailBytes);
-        await fd.read(buf, 0, tailBytes, start);
-        await fd.close();
-        const text = buf.toString('utf-8');
+        let fd;
+        let text = '';
+        try {
+          fd = await fs.promises.open(logPath, 'r');
+          const buf = Buffer.alloc(tailBytes);
+          const { bytesRead } = await fd.read(buf, 0, tailBytes, start);
+          text = buf.subarray(0, bytesRead).toString('utf-8');
+        } finally {
+          if (fd) await fd.close();
+        }
         const lines = text.split('\n');
         // Drop a leading partial line if we didn't start at byte 0.
         if (start > 0) lines.shift();
@@ -219,18 +294,28 @@ const server = http.createServer(async (req, res) => {
         }
       }
       let leftover = '';
+      // Re-entrancy guard: a slow tick must not overlap the next one, or both
+      // read the same range and corrupt pos/leftover.
+      let polling = false;
       const poll = setInterval(async () => {
+        if (polling) return;
+        polling = true;
         try {
           const st = await fs.promises.stat(logPath);
           if (st.size < pos) { pos = 0; leftover = ''; } // truncated on container restart
           if (st.size > pos) {
             const len = st.size - pos;
-            const fd = await fs.promises.open(logPath, 'r');
+            let fd;
+            let bytesRead = 0;
             const buf = Buffer.alloc(len);
-            await fd.read(buf, 0, len, pos);
-            await fd.close();
-            pos = st.size;
-            const text = leftover + buf.toString('utf-8');
+            try {
+              fd = await fs.promises.open(logPath, 'r');
+              ({ bytesRead } = await fd.read(buf, 0, len, pos));
+            } finally {
+              if (fd) await fd.close();
+            }
+            pos += bytesRead;
+            const text = leftover + buf.subarray(0, bytesRead).toString('utf-8');
             const parts = text.split('\n');
             leftover = parts.pop(); // keep last partial line for next tick
             for (const line of parts) {
@@ -241,6 +326,8 @@ const server = http.createServer(async (req, res) => {
           if (err.code !== 'ENOENT') {
             res.write(`event: error\ndata: ${JSON.stringify(err.message)}\n\n`);
           }
+        } finally {
+          polling = false;
         }
       }, 1000);
       req.on('close', () => clearInterval(poll));
@@ -271,6 +358,7 @@ const server = http.createServer(async (req, res) => {
       const opts = { host: OPENTTD_HOST, port: OPENTTD_ADMIN_PORT, password: adminPw };
       const body = JSON.parse(await readBody(req) || '{}');
       const search = (body.search || 'AdmiralAI').toLowerCase();
+      let bananasError = null;
       try {
         // Refresh content list then scan for the AI by name
         await rconCommands(opts, ['content update'], { expectClose: false, timeoutMs: 15_000 });
@@ -285,13 +373,38 @@ const server = http.createServer(async (req, res) => {
             break;
           }
         }
-        if (!foundId) {
-          return send(res, 404, JSON.stringify({ ok: false, error: 'no matching AI found on content server' }), 'application/json');
+        if (foundId) {
+          await rconCommands(opts, [`content select ${foundId}`, 'content download'], { expectClose: false, timeoutMs: 60_000 });
+          // Verify the AI actually landed — list_ai is filesystem-backed.
+          const listed = await rconQuery(opts, ['list_ai'], { timeoutMs: 5000 });
+          const installed = (listed[0] || []).some(l => !/^List of AIs/i.test(l) && l.toLowerCase().includes(search));
+          if (installed) {
+            return send(res, 200, JSON.stringify({ ok: true, via: 'bananas', installed: foundName, id: foundId }), 'application/json');
+          }
+          bananasError = 'content download via BaNaNaS returned no installed AI (CDN 502?)';
+        } else {
+          bananasError = 'no matching AI found in BaNaNaS catalog';
         }
-        await rconCommands(opts, [`content select ${foundId}`, 'content download'], { expectClose: false, timeoutMs: 60_000 });
-        return send(res, 200, JSON.stringify({ ok: true, installed: foundName, id: foundId }), 'application/json');
       } catch (err) {
-        return send(res, 502, JSON.stringify({ ok: false, error: err.message }), 'application/json');
+        bananasError = err.message;
+      }
+      // Fallback: only AdmiralAI is supported via openttdcoop.
+      if (!search.includes('admiralai')) {
+        return send(res, 502, JSON.stringify({
+          ok: false, error: bananasError + ' (fallback only available for AdmiralAI)',
+        }), 'application/json');
+      }
+      try {
+        console.log('[install-ai] BaNaNaS failed (' + bananasError + ') — falling back to openttdcoop');
+        const r = await installAdmiralAIFromOpenttdcoop();
+        return send(res, 200, JSON.stringify({
+          ok: true, via: 'openttdcoop', installed: r.file, bytes: r.bytes, bananasError,
+        }), 'application/json');
+      } catch (err) {
+        return send(res, 502, JSON.stringify({
+          ok: false, error: 'both BaNaNaS and openttdcoop fallback failed',
+          bananasError, fallbackError: err.message,
+        }), 'application/json');
       }
     }
     if (req.url === '/api/spawn-ai' && req.method === 'POST') {
@@ -315,7 +428,7 @@ const server = http.createServer(async (req, res) => {
             hint: 'Click "Install default AI" first.',
           }), 'application/json');
         }
-        const cmd = aiName ? `start_ai ${aiName.replace(/"/g, '')}` : 'start_ai';
+        const cmd = aiName ? `start_ai "${rconQuoteArg(aiName)}"` : 'start_ai';
         let out = await rconQuery(opts, [cmd], { timeoutMs: 5000 });
         const lines = out[0] || [];
         const blocked = lines.some(l => /not allowed in multiplayer/i.test(l));
@@ -338,7 +451,7 @@ const server = http.createServer(async (req, res) => {
       const body = JSON.parse(await readBody(req));
       const message = (body.message || '').toString().trim();
       if (!message) return send(res, 400, JSON.stringify({ ok: false, error: 'empty message' }), 'application/json');
-      const safeMsg = message.replace(/"/g, '\\"');
+      const safeMsg = rconQuoteArg(message);
       try {
         await rconCommands({
           host: OPENTTD_HOST,
@@ -353,7 +466,7 @@ const server = http.createServer(async (req, res) => {
     if (req.url === '/api/map-screenshot' && req.method === 'POST') {
       await takeMapScreenshot();
       await new Promise(r => setTimeout(r, 300));
-      return send(res, 200, JSON.stringify({ ok: true, ts: mapTs }), 'application/json');
+      return send(res, 200, JSON.stringify({ ok: true, ts: mapTs, history: mapHistory }), 'application/json');
     }
     if (req.url.startsWith('/api/screenshot/') && req.method === 'GET') {
       const m = req.url.match(/^\/api\/screenshot\/([\w\-\.]+)(?:\?.*)?$/);
@@ -445,9 +558,9 @@ const server = http.createServer(async (req, res) => {
       const cmds = settings.map(s => {
         const name = `${s.section}.${s.key}`;
         const v = String(s.value);
-        if (name === 'network.server_name') return `server_name "${v.replace(/"/g, '\\"')}"`;
-        if (name === 'network.server_password') return `server_password "${v.replace(/"/g, '\\"')}"`;
-        if (name === 'network.rcon_password') return `rcon_password "${v.replace(/"/g, '\\"')}"`;
+        if (name === 'network.server_name') return `server_name "${rconQuoteArg(v)}"`;
+        if (name === 'network.server_password') return `server_password "${rconQuoteArg(v)}"`;
+        if (name === 'network.rcon_password') return `rcon_password "${rconQuoteArg(v)}"`;
         return `setting ${name} ${v}`;
       });
       try {
@@ -472,12 +585,7 @@ const server = http.createServer(async (req, res) => {
             stateChanged = true;
           }
         }
-        if (stateChanged) {
-          const msg = JSON.stringify({ type: 'state', state: { ...latestState, mapTs } });
-          for (const client of wss.clients) {
-            if (client.readyState === client.OPEN) client.send(msg);
-          }
-        }
+        if (stateChanged) broadcast();
       }
       console.log(`[${new Date().toISOString()}] apply-live: ${cmds.length} commands`);
       return send(res, 200, JSON.stringify({ ok: true, applied: cmds.length }), 'application/json');
@@ -517,8 +625,24 @@ const server = http.createServer(async (req, res) => {
           hint: 'check that allow_insecure_admin_login = true in openttd.cfg',
         }), 'application/json');
       }
-      console.log(`[${new Date().toISOString()}] apply-restart: staged cfg, saved game, sent quit`);
-      return send(res, 200, JSON.stringify({ ok: true }), 'application/json');
+      // openttd runs with restart: "no", so the save+quit leaves the container
+      // exited. Bring it back up (applying the staged cfg) — otherwise the
+      // server would stay down after every restart-only settings apply.
+      let restarted = false;
+      if (CONTAINER_SOCKET) {
+        try {
+          const r = await restartAfterExit(CONTAINER_NAME);
+          restarted = r.restarted;
+        } catch (e) {
+          console.error('apply-restart: auto-restart failed:', e.message);
+          return send(res, 200, JSON.stringify({
+            ok: true, restarted: false,
+            note: 'cfg saved and server quit, but auto-restart failed: ' + e.message + '. Start it manually.',
+          }), 'application/json');
+        }
+      }
+      console.log(`[${new Date().toISOString()}] apply-restart: staged cfg, saved game, restarted (${restarted})`);
+      return send(res, 200, JSON.stringify({ ok: true, restarted }), 'application/json');
     }
     if (req.url === '/api/fresh-start' && req.method === 'POST') {
       // Stage cfg if provided (so the user's pending edits win after start).
@@ -553,15 +677,13 @@ const server = http.createServer(async (req, res) => {
           password: adminPw,
         });
         // With restart: no on the openttd service, the container exits after
-        // rconQuit and stays down. Explicitly start it back up so fresh-start
-        // ends with a running server.
+        // rconQuit and stays down. Wait for it to actually exit, then start it
+        // back up so fresh-start ends with a running server.
         let restarted = false;
         if (CONTAINER_SOCKET) {
-          // Give the container a moment to actually exit before starting.
-          await new Promise(r => setTimeout(r, 1500));
           try {
-            const r = await startContainer(CONTAINER_NAME);
-            restarted = !r.already;
+            const r = await restartAfterExit(CONTAINER_NAME);
+            restarted = r.restarted;
           } catch (e) {
             return send(res, 200, JSON.stringify({
               ok: true, sentinel, quit: true, restarted: false,
@@ -632,28 +754,121 @@ let latestState = null;
 let prevConnected = false;
 let bootSavePending = false;
 let mapTs = 0;
+// History of yearly minimap snapshots — populated from disk on boot and
+// extended as new snapshots are taken. Each entry: { year, ts, file }.
+let mapHistory = [];
+const SCREENSHOT_DIR = path.join(DATA_ROOT, '.local/share/openttd/screenshot');
 const wss = new WebSocketServer({ noServer: true });
 
-async function takeMapScreenshot() {
+// Cached starting_year from openttd.cfg, refreshed on mtime change.
+let cachedStartingYear = null;
+let cachedStartingYearMtime = 0;
+function readStartingYear() {
+  const cfgPath = path.join(DATA_DIR, 'openttd.cfg');
+  try {
+    const st = fs.statSync(cfgPath);
+    if (st.mtimeMs === cachedStartingYearMtime) return cachedStartingYear;
+    const text = fs.readFileSync(cfgPath, 'utf-8');
+    const m = text.match(/^\s*starting_year\s*=\s*(\d+)\s*$/m);
+    cachedStartingYear = m ? parseInt(m[1], 10) : null;
+    cachedStartingYearMtime = st.mtimeMs;
+    return cachedStartingYear;
+  } catch {
+    return cachedStartingYear;
+  }
+}
+
+function mapStatePayload(state) {
+  return { ...state, mapTs, mapHistory, startingYear: readStartingYear() };
+}
+
+function broadcast() {
+  if (!latestState) return;
+  const msg = JSON.stringify({ type: 'state', state: mapStatePayload(latestState) });
+  for (const client of wss.clients) {
+    if (client.readyState === client.OPEN) client.send(msg);
+  }
+}
+
+function sortKey(e) { return e.year * 12 + (e.month ?? 0); }
+
+async function loadMapHistory() {
+  try {
+    const files = await fs.promises.readdir(SCREENSHOT_DIR);
+    const entries = [];
+    for (const f of files) {
+      // New format: live-map-1989-12.png  (year-month, month 1-12)
+      // Legacy:     live-map-Y1989.png    (year only, treated as Jan)
+      let year = null, month = null;
+      let m = f.match(/^live-map-(\d+)-(\d{2})\.png$/);
+      if (m) { year = parseInt(m[1], 10); month = parseInt(m[2], 10) - 1; }
+      else {
+        m = f.match(/^live-map-Y(\d+)\.png$/);
+        if (m) { year = parseInt(m[1], 10); month = null; }
+      }
+      if (year == null) continue;
+      try {
+        const st = await fs.promises.stat(path.join(SCREENSHOT_DIR, f));
+        entries.push({ year, month, ts: st.mtimeMs, file: f });
+      } catch {}
+    }
+    entries.sort((a, b) => sortKey(a) - sortKey(b));
+    mapHistory = entries;
+  } catch { /* dir doesn't exist yet — fine */ }
+}
+loadMapHistory();
+
+// Single-flight guard: boot, month-rollover, and manual refresh can all fire
+// near-simultaneously. Without serialization two calls for the same year/month
+// both pass the await, both find no existing entry, and both push a duplicate.
+let mapScreenshotInFlight = null;
+function takeMapScreenshot() {
+  if (mapScreenshotInFlight) return mapScreenshotInFlight;
+  mapScreenshotInFlight = doTakeMapScreenshot().finally(() => { mapScreenshotInFlight = null; });
+  return mapScreenshotInFlight;
+}
+
+async function doTakeMapScreenshot() {
   const pw = readAdminPassword();
   if (!pw) return;
+  const year = latestState && latestState.year != null ? latestState.year : null;
+  const month = latestState && latestState.month != null ? latestState.month : null;
+  let baseName;
+  if (year != null && month != null) {
+    baseName = `live-map-${year}-${String(month + 1).padStart(2, '0')}`;
+  } else if (year != null) {
+    baseName = `live-map-Y${year}`;
+  } else {
+    baseName = 'live-map';
+  }
   try {
     await rconCommands({
       host: OPENTTD_HOST,
       port: OPENTTD_ADMIN_PORT,
       password: pw,
-    }, ['screenshot minimap live-map'], { expectClose: false, timeoutMs: 30_000 });
+    }, [`screenshot minimap ${baseName}`], { expectClose: false, timeoutMs: 30_000 });
     mapTs = Date.now();
-    // Push fresh state so dashboards reload the image.
-    if (latestState) {
-      const msg = JSON.stringify({ type: 'state', state: { ...latestState, mapTs } });
-      for (const client of wss.clients) {
-        if (client.readyState === client.OPEN) client.send(msg);
-      }
+    if (year != null) {
+      const file = `${baseName}.png`;
+      const existing = mapHistory.find(e => e.year === year && e.month === month);
+      if (existing) { existing.ts = mapTs; existing.file = file; }
+      else { mapHistory.push({ year, month, ts: mapTs, file }); mapHistory.sort((a, b) => sortKey(a) - sortKey(b)); }
     }
+    broadcast();
   } catch (e) {
     console.log('[map-screenshot] failed:', e.message);
   }
+}
+
+async function clearMapHistory() {
+  for (const entry of mapHistory) {
+    try { await fs.promises.unlink(path.join(SCREENSHOT_DIR, entry.file)); } catch {}
+  }
+  // Also remove any stray live-map.png so we don't show pre-newgame content.
+  try { await fs.promises.unlink(path.join(SCREENSHOT_DIR, 'live-map.png')); } catch {}
+  mapHistory = [];
+  mapTs = Date.now();
+  broadcast();
 }
 
 async function bootSave() {
@@ -691,18 +906,19 @@ const live = new LiveAdmin({
       }, 5_000);
     }
     prevConnected = state.connected;
-    const msg = JSON.stringify({ type: 'state', state: { ...state, mapTs } });
-    for (const client of wss.clients) {
-      if (client.readyState === client.OPEN) client.send(msg);
-    }
+    broadcast();
   },
-  onYearChange: year => {
-    console.log(`[live] year rolled over to ${year} — taking map snapshot`);
+  onMonthChange: (year, month) => {
+    console.log(`[live] month rolled over to ${year}-${String(month+1).padStart(2,'0')} — taking map snapshot`);
     takeMapScreenshot();
+  },
+  onNewGame: () => {
+    console.log('[live] new game detected — clearing map history');
+    clearMapHistory();
   },
 });
 wss.on('connection', ws => {
-  if (latestState) ws.send(JSON.stringify({ type: 'state', state: { ...latestState, mapTs } }));
+  if (latestState) ws.send(JSON.stringify({ type: 'state', state: mapStatePayload(latestState) }));
 });
 server.on('upgrade', (req, socket, head) => {
   if (req.url === '/api/live-ws') {
@@ -722,3 +938,13 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
     server.close(() => process.exit(0));
   });
 }
+
+// Last-resort net so a stray throw (e.g. an unexpected admin frame) can't take
+// the whole API down. The frame parser already guards known cases; this keeps
+// the config editor and dashboard alive for everyone if something slips past.
+process.on('uncaughtException', err => {
+  console.error('[uncaughtException]', err && err.stack ? err.stack : err);
+});
+process.on('unhandledRejection', err => {
+  console.error('[unhandledRejection]', err && err.stack ? err.stack : err);
+});

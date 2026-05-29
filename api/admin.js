@@ -39,6 +39,10 @@ function parseFrames(buffer) {
   let off = 0;
   while (off + 3 <= buffer.length) {
     const len = buffer.readUInt16LE(off);
+    // A frame is at least its 3-byte header. len < 3 means the stream is
+    // desynced; advancing by len would loop forever on len === 0. Drop the
+    // rest of the buffer to resync.
+    if (len < 3) return { frames, rest: Buffer.alloc(0) };
     if (off + len > buffer.length) break;
     const type = buffer.readUInt8(off + 2);
     frames.push({ type, payload: buffer.slice(off + 3, off + len) });
