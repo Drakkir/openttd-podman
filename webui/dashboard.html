@@ -51,7 +51,14 @@
     </form>
   </section>
   <section class="card">
-    <h2>Map <button id="refresh-map" class="btn" type="button" style="float:right;font-size:11px;padding:4px 9px;">Refresh</button></h2>
+    <h2>Map
+      <span class="h2-actions">
+        <span id="map-year">—</span>
+        <button id="map-prev" class="btn" type="button" title="Older snapshot">◀</button>
+        <button id="map-next" class="btn" type="button" title="Newer snapshot">▶</button>
+        <button id="refresh-map" class="btn" type="button">Refresh</button>
+      </span>
+    </h2>
     <div id="map-wrap">
       <img id="map-img" alt="" hidden>
       <p id="map-empty" class="empty">Click <em>Refresh</em> to generate a minimap snapshot.</p>
@@ -65,6 +72,13 @@
           <option value="loan">Loan</option>
           <option value="income">Income</option>
           <option value="value">Value</option>
+        </select>
+        <select id="econ-window" class="btn" style="font-size:11px;padding:3px 6px;">
+          <option value="0">All</option>
+          <option value="1">1 yr</option>
+          <option value="5" selected>5 yrs</option>
+          <option value="10">10 yrs</option>
+          <option value="25">25 yrs</option>
         </select>
       </span>
     </h2>

@@ -170,6 +170,17 @@
   word-break: break-all;
 }
 
+#map-year {
+  font-size: 12px;
+  font-weight: 500;
+  color: #44403c;
+  padding: 2px 8px;
+  background: #f5f5f4;
+  border-radius: 4px;
+  font-variant-numeric: tabular-nums;
+}
+#map-prev, #map-next { padding: 4px 8px; }
+#map-prev:disabled, #map-next:disabled { opacity: 0.35; cursor: not-allowed; }
 #map-wrap { text-align: center; }
 #map-img {
   max-width: 100%;
