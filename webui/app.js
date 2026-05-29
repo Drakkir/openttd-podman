@@ -1143,69 +1143,49 @@ function collectModifiedSettings() {
   return out;
 }
 
+// Sparse payload of changed settings for the apply endpoints. The backend
+// patches only these keys into the existing cfg files (never reserializes the
+// whole file), so passwords / network keys / unmodelled settings survive.
+// `cfg` = value as written to the .cfg line; `rcon` = value for `setting`.
+function changedSettingsPayload() {
+  return collectModifiedSettings().map(m => ({
+    section: m.section,
+    key: m.key,
+    file: m.entry.file || 'openttd',
+    change: m.entry.change,
+    cfg: serializeValue(m.entry, m.value),
+    rcon: serializeValueForRcon(m.entry, m.value),
+  }));
+}
+
 async function applyLive() {
   const modified = collectModifiedSettings();
   if (modified.length === 0) {
     flash(T('apply_live_nothing'));
     return;
   }
-  const live = modified.filter(m => m.entry.change === 'live');
+  const liveCount = modified.filter(m => m.entry.change === 'live').length;
   const restartCount = modified.filter(m => m.entry.change === 'restart').length;
   const newgameCount = modified.filter(m => m.entry.change === 'newgame').length;
-  const settings = live.map(m => ({
-    section: m.section,
-    key: m.key,
-    value: serializeValueForRcon(m.entry, m.value),
-  }));
-  if (settings.length === 0) {
-    // All edits need restart/new game — still stage them via the API.
-    try {
-      await fetch('/api/apply-live', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          openttd: serializeCfg('openttd'),
-          private: serializeCfg('private'),
-          secrets: serializeCfg('secrets'),
-          settings: [],
-        }),
-      });
-      if (!state.loaded) state.loaded = {};
-      for (const m of modified) state.loaded[valKey(m.section, m.key)] = m.value;
-      document.querySelectorAll('.setting.modified').forEach(c => c.classList.remove('modified'));
-      flash(T('apply_live_only_skipped', restartCount, newgameCount));
-    } catch (e) {
-      flash(T('apply_live_failed') + e.message);
-    }
-    return;
-  }
   try {
     const r = await fetch('/api/apply-live', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        // Stage all three cfgs so disk matches the editor; live settings get
-        // rcon'd in addition so OpenTTD's memory reflects the change now.
-        openttd: serializeCfg('openttd'),
-        private: serializeCfg('private'),
-        secrets: serializeCfg('secrets'),
-        settings,
-      }),
+      body: JSON.stringify({ settings: changedSettingsPayload() }),
     });
     const data = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
-    // Update baseline so the just-applied settings are no longer flagged as
-    // "modified" in the editor (matches the new on-disk state).
+    // Update baseline so applied settings are no longer flagged as "modified".
     if (!state.loaded) state.loaded = {};
-    for (const m of modified) {
-      state.loaded[valKey(m.section, m.key)] = m.value;
-    }
+    for (const m of modified) state.loaded[valKey(m.section, m.key)] = m.value;
     document.querySelectorAll('.setting.modified').forEach(c => c.classList.remove('modified'));
-    let msg = T('apply_live_done', data.applied ?? settings.length);
-    if (restartCount || newgameCount) {
-      msg += T('apply_live_skipped', restartCount, newgameCount);
+    if (liveCount === 0) {
+      flash(T('apply_live_only_skipped', restartCount, newgameCount));
+    } else {
+      let msg = T('apply_live_done', data.applied ?? liveCount);
+      if (restartCount || newgameCount) msg += T('apply_live_skipped', restartCount, newgameCount);
+      flash(msg);
     }
-    flash(msg);
   } catch (e) {
     flash(T('apply_live_failed') + e.message);
   }
@@ -1214,15 +1194,10 @@ async function applyLive() {
 async function applyAndRestart() {
   if (!confirm(T('apply_restart_confirm'))) return;
   try {
-    const body = {
-      openttd: serializeCfg('openttd'),
-      private: serializeCfg('private'),
-      secrets: serializeCfg('secrets'),
-    };
     const r = await fetch('/api/apply-restart', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ settings: changedSettingsPayload() }),
     });
     const data = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
@@ -1235,15 +1210,10 @@ async function applyAndRestart() {
 async function freshStart() {
   if (!confirm(T('fresh_start_confirm'))) return;
   try {
-    const body = {
-      openttd: serializeCfg('openttd'),
-      private: serializeCfg('private'),
-      secrets: serializeCfg('secrets'),
-    };
     const r = await fetch('/api/fresh-start', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ settings: changedSettingsPayload() }),
     });
     const data = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
@@ -1274,14 +1244,16 @@ async function loadFromServer() {
 }
 
 async function saveToServer() {
+  // Stage changed settings (patched into a copy of the live cfg) without
+  // restarting — they apply at the next restart. Uses the same sparse-patch
+  // path as apply-restart so nothing else in the cfg is clobbered.
   try {
-    const targets = ['openttd', 'private', 'secrets'];
-    await Promise.all(targets.map(t =>
-      fetch('/api/cfg/' + t, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'text/plain' },
-        body: serializeCfg(t),
-      }).then(r => { if (!r.ok) throw new Error(t + ': ' + r.status); })));
+    const r = await fetch('/api/apply-restart', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ settings: changedSettingsPayload(), stageOnly: true }),
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
     flash(T('saved_restart'));
   } catch (e) {
     flash(T('save_failed') + e.message);

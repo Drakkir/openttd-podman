@@ -151,6 +151,93 @@ function rconQuoteArg(v) {
   return clean.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 }
 
+// Build the rcon command for one changed setting. Quotes the value when it
+// contains whitespace or is empty so multi-word values (e.g. a client_name
+// with a space) aren't split into extra args and silently dropped.
+function settingRconCmd(s) {
+  const name = `${s.section}.${s.key}`;
+  const v = String(s.rcon ?? '');
+  if (name === 'network.server_name') return `server_name "${rconQuoteArg(v)}"`;
+  if (name === 'network.server_password') return `server_password "${rconQuoteArg(v)}"`;
+  if (name === 'network.rcon_password') return `rcon_password "${rconQuoteArg(v)}"`;
+  const arg = (/\s/.test(v) || v === '') ? `"${rconQuoteArg(v)}"` : v;
+  return `setting ${name} ${arg}`;
+}
+
+// Patch only the given key=value lines into an existing cfg's text, preserving
+// every other line: machine-managed secrets (client_secret_key, invite codes),
+// passwords, and any setting the editor doesn't model. This replaces the old
+// "reserialize the whole file from the editor" approach, which wiped anything
+// not in the editor's schema/loaded state. changes: [{section, key, value}].
+function patchCfgText(text, changes) {
+  const bySection = new Map();
+  for (const c of changes) {
+    if (!bySection.has(c.section)) bySection.set(c.section, new Map());
+    bySection.get(c.section).set(c.key, c.value);
+  }
+  const applied = new Set();       // "section\0key"
+  const seenSection = new Set();
+  const out = [];
+  let cur = null;
+  const flushMissing = sec => {
+    if (sec == null || !bySection.has(sec)) return;
+    for (const [key, val] of bySection.get(sec)) {
+      if (!applied.has(sec + '\0' + key)) {
+        out.push(`${key} = ${val}`);
+        applied.add(sec + '\0' + key);
+      }
+    }
+  };
+  const lines = text.length ? text.split('\n') : [];
+  for (const line of lines) {
+    const h = line.match(/^\s*\[([^\]]+)\]\s*$/);
+    if (h) {
+      flushMissing(cur);           // add this section's not-yet-seen keys before moving on
+      cur = h[1];
+      seenSection.add(cur);
+      out.push(line);
+      continue;
+    }
+    const kv = line.match(/^\s*([A-Za-z0-9_.]+)\s*=/);
+    if (kv && cur && bySection.has(cur) && bySection.get(cur).has(kv[1])) {
+      out.push(`${kv[1]} = ${bySection.get(cur).get(kv[1])}`);
+      applied.add(cur + '\0' + kv[1]);
+      continue;
+    }
+    out.push(line);
+  }
+  flushMissing(cur);               // last section in the file
+  for (const [sec, kv] of bySection) {   // sections not present at all
+    if (seenSection.has(sec)) continue;
+    out.push(`[${sec}]`);
+    for (const [key, val] of kv) out.push(`${key} = ${val}`);
+  }
+  return out.join('\n');
+}
+
+// Apply changed settings to cfg files by patching (never reserializing).
+// settings: [{section, key, file, cfg}]. staged=true writes *.cfg.staged
+// (consumed by entrypoint on next boot); staged=false patches the live *.cfg.
+async function applySettingsToCfg(settings, { staged }) {
+  const byFile = {};
+  for (const s of settings) {
+    const f = TARGETS.has(s.file) ? s.file : 'openttd';
+    (byFile[f] = byFile[f] || []).push({ section: s.section, key: s.key, value: s.cfg });
+  }
+  for (const [target, changes] of Object.entries(byFile)) {
+    const livePath = path.join(DATA_DIR, target + '.cfg');
+    const text = await fs.promises.readFile(livePath, 'utf-8').catch(() => '');
+    const patched = patchCfgText(text, changes);
+    if (staged) {
+      const st = path.join(DATA_DIR, target + '.cfg.staged');
+      await fs.promises.writeFile(st + '.tmp', patched, 'utf-8');
+      await fs.promises.rename(st + '.tmp', st);
+    } else {
+      await atomicWrite(livePath, patched);
+    }
+  }
+}
+
 const DATA_DIR = process.env.DATA_DIR || '/data/.config/openttd';
 const DATA_ROOT = process.env.DATA_ROOT || '/data';
 const PORT = parseInt(process.env.PORT || '3000', 10);
@@ -533,36 +620,20 @@ const server = http.createServer(async (req, res) => {
         }), 'application/json');
       }
       const body = JSON.parse(await readBody(req));
-      // Write directly to .cfg (not .staged) so the file reflects the editor
-      // state immediately. Safe because the live settings we're about to push
-      // via rcon will keep openttd's in-memory state matching this cfg, so a
-      // future clean shutdown writes back the same values rather than
-      // clobbering. Restart-only settings stay in the cfg until next start;
-      // if openttd shuts down before then they may revert — call apply-restart
-      // when you want those locked in.
-      for (const target of ['openttd', 'private', 'secrets']) {
-        if (typeof body[target] !== 'string') continue;
-        const file = path.join(DATA_DIR, target + '.cfg');
-        await atomicWrite(file, body[target]);
-      }
+      const settings = Array.isArray(body.settings) ? body.settings : [];
+      // Patch only the changed keys into the live cfg — never reserialize the
+      // whole file (that wiped passwords, network keys, and settings the
+      // editor doesn't model).
+      await applySettingsToCfg(settings, { staged: false });
       // Clear any leftover staged files from earlier apply-restart attempts.
       for (const target of ['openttd', 'private', 'secrets']) {
         await fs.promises.unlink(path.join(DATA_DIR, target + '.cfg.staged')).catch(() => {});
       }
-      const settings = Array.isArray(body.settings) ? body.settings : [];
-      if (settings.length === 0) {
+      const live = settings.filter(s => s.change === 'live');
+      if (live.length === 0) {
         return send(res, 200, JSON.stringify({ ok: true, applied: 0, staged: true }), 'application/json');
       }
-      // Build rcon commands. Most settings use `setting <name> <value>`.
-      // A few have dedicated commands (server_name, server_password, rcon_password).
-      const cmds = settings.map(s => {
-        const name = `${s.section}.${s.key}`;
-        const v = String(s.value);
-        if (name === 'network.server_name') return `server_name "${rconQuoteArg(v)}"`;
-        if (name === 'network.server_password') return `server_password "${rconQuoteArg(v)}"`;
-        if (name === 'network.rcon_password') return `rcon_password "${rconQuoteArg(v)}"`;
-        return `setting ${name} ${v}`;
-      });
+      const cmds = live.map(settingRconCmd);
       try {
         await rconCommands({
           host: OPENTTD_HOST,
@@ -575,13 +646,13 @@ const server = http.createServer(async (req, res) => {
           error: 'admin port error: ' + err.message,
         }), 'application/json');
       }
-      // Settings like server_name come from WELCOME and won't change in the
-      // ws state on their own; patch them in so dashboards see the new value.
+      // server_name comes from WELCOME and won't change in the ws state on its
+      // own; patch it in so dashboards see the new value immediately.
       if (latestState) {
         let stateChanged = false;
-        for (const s of settings) {
+        for (const s of live) {
           if (s.section === 'network' && s.key === 'server_name') {
-            latestState.serverName = s.value;
+            latestState.serverName = s.cfg;
             stateChanged = true;
           }
         }
@@ -599,26 +670,35 @@ const server = http.createServer(async (req, res) => {
           error: 'admin_password not set in secrets.cfg',
         }), 'application/json');
       }
-      // Stage cfg files first. entrypoint.sh will move .staged → .cfg
-      // at next startup so they win over what OpenTTD writes on shutdown.
-      for (const target of ['openttd', 'private', 'secrets']) {
-        if (typeof body[target] !== 'string') continue;
-        const staged = path.join(DATA_DIR, target + '.cfg.staged');
-        await fs.promises.writeFile(staged + '.tmp', body[target], 'utf-8');
-        await fs.promises.rename(staged + '.tmp', staged);
+      const settings = Array.isArray(body.settings) ? body.settings : [];
+      // Stage by patching changed keys into a copy of the live cfg, preserving
+      // everything else. entrypoint.sh moves .staged → .cfg at next start.
+      await applySettingsToCfg(settings, { staged: true });
+      // stageOnly = "save to server" (no restart): just leave the staged files.
+      if (body.stageOnly) {
+        return send(res, 200, JSON.stringify({ ok: true, staged: true }), 'application/json');
       }
       try {
-        // Save game state before quit so the next start has a recent autosave
-        // to resume from. Filename goes under autosave/ so entrypoint picks it
-        // up as the latest .sav.
+        // Apply live-class settings via rcon FIRST, then save, then quit. Most
+        // game settings (_settings_game) are mutable at runtime, so this bakes
+        // them into the savegame and they survive the resume. Client settings
+        // are also read from the staged cfg on restart. (A few settings OpenTTD
+        // locks mid-game — e.g. enabling inflation, or ai_in_multiplayer with
+        // AIs present — won't stick here; those need a Fresh start.)
         const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-        await rconSaveAndQuit({
+        const live = settings.filter(s => s.change === 'live');
+        const cmds = [
+          ...live.map(settingRconCmd),
+          'save autosave/pre-restart-' + stamp,
+          'quit',
+        ];
+        await rconCommands({
           host: OPENTTD_HOST,
           port: OPENTTD_ADMIN_PORT,
           password: adminPw,
-        }, 'autosave/pre-restart-' + stamp);
+        }, cmds);
       } catch (err) {
-        console.error('rconSaveAndQuit failed:', err.message);
+        console.error('apply-restart rcon failed:', err.message);
         return send(res, 502, JSON.stringify({
           ok: false,
           error: 'could not reach openttd admin port: ' + err.message,
@@ -645,17 +725,12 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, JSON.stringify({ ok: true, restarted }), 'application/json');
     }
     if (req.url === '/api/fresh-start' && req.method === 'POST') {
-      // Stage cfg if provided (so the user's pending edits win after start).
-      const body = await readBody(req);
-      if (body) {
-        const parsed = JSON.parse(body);
-        for (const target of ['openttd', 'private', 'secrets']) {
-          if (typeof parsed[target] !== 'string') continue;
-          const staged = path.join(DATA_DIR, target + '.cfg.staged');
-          await fs.promises.writeFile(staged + '.tmp', parsed[target], 'utf-8');
-          await fs.promises.rename(staged + '.tmp', staged);
-        }
-      }
+      // Stage the user's pending edits by patching changed keys into a copy of
+      // the live cfg (a fresh game reads these as _settings_newgame). No rcon
+      // apply needed — there's no running game to mutate.
+      const parsed = JSON.parse((await readBody(req)) || '{}');
+      const settings = Array.isArray(parsed.settings) ? parsed.settings : [];
+      await applySettingsToCfg(settings, { staged: true });
       const sentinel = path.join(DATA_ROOT, '.no-resume');
       await fs.promises.writeFile(sentinel, 'set ' + new Date().toISOString() + '\n');
       console.log(`[${new Date().toISOString()}] sentinel + staged cfg ready`);
